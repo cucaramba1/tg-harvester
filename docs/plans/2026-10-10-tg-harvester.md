@@ -1363,7 +1363,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 Формат «Обо мне.canvas»: группа `Сферы жизни (2-й уровень)` (x=0, y=1080), внутри file-ноды L2-холстов 440x180 сеткой по 5 в ряд, шаг 460 по x и 200 по y, отступ 30 слева и 60 сверху.
 
-- [ ] **Step 1: Падающий тест**
+- [x] **Step 1: Падающий тест**
 
 `tests/test_vault_setup.py`:
 
@@ -1402,12 +1402,12 @@ def test_ensure_section_is_idempotent_and_works_without_root(tmp_path):
     assert ensure_section(tmp_path, "Музыка") == []
 ```
 
-- [ ] **Step 2: Убедиться, что падает**
+- [x] **Step 2: Убедиться, что падает**
 
 Run: `uv run pytest tests/test_vault_setup.py -q`
 Expected: FAIL, `ModuleNotFoundError: No module named 'harvester.vault_setup'`
 
-- [ ] **Step 3: `harvester/vault_setup.py`**
+- [x] **Step 3: `harvester/vault_setup.py`**
 
 ```python
 """Новый раздел L2: папка, MOC, холст и file-нода в «Обо мне» (корень L1)."""
@@ -1451,12 +1451,12 @@ def ensure_section(vault: Path, name: str) -> list[str]:
     return created
 ```
 
-- [ ] **Step 4: Тесты зелёные**
+- [x] **Step 4: Тесты зелёные**
 
 Run: `uv run pytest -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
