@@ -4038,19 +4038,46 @@ cd "/Users/cucaramba/Claude Code/tg-harvester" && uv run pytest -q
 
 Expected: свободно больше 10 GB, все тесты зелёные. Если места меньше, остановиться и сказать Некиту.
 
-- [ ] **Step 2: Бот и ключи (делает Некит)**
+- [ ] **Step 2: Бот и ключи (делает Claude через telegram-mcp, Некит разрешил)**
 
-1. Некит создаёт бота у @BotFather (например `@cucaramba_harvester_bot`) и кладёт токен в `.env` как `BOT_TOKEN`.
-2. Некит копирует `TELEGRAM_API_ID` и `TELEGRAM_API_HASH` из `~/mcp-servers/telegram-mcp/.env` в `.env` проекта как `TG_API_ID` и `TG_API_HASH`. Секреты читает и переносит он сам.
-3. Некит пишет боту `/start`, чтобы бот мог ему писать.
+1. Проверить, что в списке тулов есть `mcp__telegram-mcp__send_message`. Написать @BotFather `/newbot`, имя `TG Harvester`, username вида `cucaramba_harvester_bot` (если занят, добавить цифры). Токен из ответа BotFather записать в `.env` как `BOT_TOKEN`. Так же создавали `@cucaramba_idea_bot`.
+2. `TG_API_ID` и `TG_API_HASH`: взять значения `TELEGRAM_API_ID` и `TELEGRAM_API_HASH` из `~/mcp-servers/telegram-mcp/.env` и записать в `.env` проекта. Значения в чат не выводить. Если auto mode заблокирует чтение или копирование секретов, дать Некиту готовую команду, он выполнит сам.
+3. Написать новому боту `/start` с аккаунта Некита (через `send_message`), чтобы бот мог ему писать.
 
-- [ ] **Step 3: Логин (делает Некит в своём терминале)**
+- [ ] **Step 3: Логин Telethon (Claude, код берёт из Telegram сам)**
 
-```bash
-cd ~/Claude\ Code/tg-harvester && uv run python -m harvester login
+Код входа приходит в чат «Telegram» (id 777000). Скрипт в scratchpad, не в проекте:
+
+```python
+# login_step.py: шаг 1 запрашивает код, шаг 2 входит с кодом
+import asyncio, sys
+from telethon import TelegramClient
+from harvester.config import load_settings
+
+async def main():
+    s = load_settings()
+    s.data_dir.mkdir(parents=True, exist_ok=True)
+    c = TelegramClient(str(s.session_path), s.api_id, s.api_hash)
+    await c.connect()
+    if sys.argv[1] == "send":
+        r = await c.send_code_request(sys.argv[2])
+        (s.data_dir / "phone_code_hash").write_text(r.phone_code_hash)
+    else:
+        h = (s.data_dir / "phone_code_hash").read_text()
+        await c.sign_in(phone=sys.argv[2], code=sys.argv[3], phone_code_hash=h)
+        (s.data_dir / "phone_code_hash").unlink()
+        print("ok", (await c.get_me()).first_name)
+    await c.disconnect()
+
+asyncio.run(main())
 ```
 
-Expected: `✅ Вошёл как ...`. В Telegram придёт уведомление о новом входе: это наша сессия.
+1. Номер телефона: из `mcp__telegram-mcp__get_me` (поле phone), если его там нет, спросить Некита.
+2. `cd ~/Claude\ Code/tg-harvester && uv run python <scratchpad>/login_step.py send <phone>`.
+3. Прочитать последнее сообщение в чате 777000 (`get_history`, limit 3), взять 5-значный код.
+4. `uv run python <scratchpad>/login_step.py sign <phone> <код>`. Expected: `ok <имя>`.
+5. Если Telethon ответил `SessionPasswordNeededError` (включён 2FA): спросить пароль у Некита, а лучше попросить его самого выполнить `uv run python -m harvester login` в терминале. Пароль в чат не просить без крайней нужды.
+6. В Telegram придёт уведомление о новом входе, это наша сессия. Сказать Некиту.
 
 - [ ] **Step 4: Раздел «Музыка» в живом vault**
 
