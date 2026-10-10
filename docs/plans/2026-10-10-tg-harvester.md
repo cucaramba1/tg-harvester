@@ -89,7 +89,7 @@ tg-harvester/
   - `DB(path)` с методами из кода ниже; JSON-поля `media, images, top3, alts, extra` сериализуются автоматически.
   - `tests/helpers.py`: `make_settings(tmp, **over)`, `CHAT_A=-1001234`, `CHAT_B=-1005678`, `make_draft(...)`, `FakeClaude`
 
-- [ ] **Step 1: Каркас и зависимости**
+- [x] **Step 1: Каркас и зависимости**
 
 ```bash
 cd "/Users/cucaramba/Claude Code/tg-harvester"
@@ -199,7 +199,7 @@ channels:
   - {id: -1001774404107, name: "НейроGod Промты / Claude prompt"}
 ```
 
-- [ ] **Step 2: Тестовые хелперы**
+- [x] **Step 2: Тестовые хелперы**
 
 `tests/helpers.py`:
 
@@ -274,7 +274,7 @@ def db(s):
     return DB(s.db_path)
 ```
 
-- [ ] **Step 3: Падающие тесты конфига и БД**
+- [x] **Step 3: Падающие тесты конфига и БД**
 
 `tests/test_config.py`:
 
@@ -383,12 +383,12 @@ def test_alerts_pop_once_and_kv(db):
     assert db.kv_get("k") == "v"
 ```
 
-- [ ] **Step 4: Убедиться, что падают**
+- [x] **Step 4: Убедиться, что падают**
 
 Run: `uv run pytest -q`
 Expected: FAIL, `ModuleNotFoundError: No module named 'harvester.config'`
 
-- [ ] **Step 5: `harvester/config.py`**
+- [x] **Step 5: `harvester/config.py`**
 
 ```python
 """Настройки: .env (секреты и пути) + config/*.yaml + data/calibration.json (пороги после пилота)."""
@@ -543,7 +543,7 @@ def load_settings(root: Path | None = None) -> Settings:
     )
 ```
 
-- [ ] **Step 6: `harvester/db.py`**
+- [x] **Step 6: `harvester/db.py`**
 
 ```python
 """SQLite: посты, каналы, черновики, блоки, разметка, аудит, алерты, kv.
@@ -805,12 +805,12 @@ class DB:
         self.c.execute("INSERT OR REPLACE INTO kv(key, value) VALUES(?, ?)", (key, value))
 ```
 
-- [ ] **Step 7: Тесты зелёные**
+- [x] **Step 7: Тесты зелёные**
 
 Run: `uv run pytest -q`
 Expected: PASS (9 passed)
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -A

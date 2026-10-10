@@ -1,0 +1,28 @@
+goals_note: Продуктивность и привычки/Мои цели.md
+# сбор
+retro_until: 2025-10-10
+retro_cap: 5000            # больше постов в ретро-окне канала: режем до retro_fallback_days
+retro_fallback_days: 60
+chunk: 100                 # сообщений за один шаг сборщика
+request_pause: 2           # секунд между шагами
+# фильтр
+min_chars: 80
+ad_markers: ["erid", "#реклама", "на правах рекламы", "розыгрыш", "промокод", "#ad"]
+max_images: 4
+min_free_gb: 10
+embed_model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+note_threshold: 0.6        # перекрывается data/calibration.json
+section_threshold: 0.45
+explore_quota: 10          # постов вне тем в ночь
+skip_sections: ["Скиллы на машине"]
+# ночь
+batch_size: 20
+max_calls_per_night: 5     # калибруется на пилоте
+retro_multiplier: 2.5      # пока какой-то канал не в фазе done
+max_images_per_night: 10
+claude_timeout: 300
+# бот и запись
+cards_per_day: 30
+cards_hour: 9
+snapshot_days: 30
+attachments_dir: Вложения/Telegram
