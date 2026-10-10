@@ -834,7 +834,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `Writer(s, db).apply(draft_id) -> block_id`, `Writer.rollback(block_id) -> "ok" | "changed" | "gone" | "already"`
   - Блок append хранит `extra = {"text": вставка целиком, "line": только строка, "image"?: rel}`; блок new: `extra = {"item", "moc"?, "canvas"?, "node"?, "image"?}`
 
-- [ ] **Step 1: Скопировать fs.py и canvas.py из idea-bot**
+- [x] **Step 1: Скопировать fs.py и canvas.py из idea-bot**
 
 ```bash
 cd "/Users/cucaramba/Claude Code/tg-harvester"
@@ -907,7 +907,7 @@ def moc_remove(moc: Path, item: str) -> None:
     atomic_write(moc, "".join(out).rstrip("\n") + "\n")
 ```
 
-- [ ] **Step 2: Падающие тесты Writer**
+- [x] **Step 2: Падающие тесты Writer**
 
 `tests/test_writer.py`:
 
@@ -1076,12 +1076,12 @@ def test_prune_snapshots_drops_old_days(s):
     assert not old.exists() and new.exists()
 ```
 
-- [ ] **Step 3: Убедиться, что падают**
+- [x] **Step 3: Убедиться, что падают**
 
 Run: `uv run pytest tests/test_writer.py -q`
 Expected: FAIL, `ModuleNotFoundError: No module named 'harvester.files'`
 
-- [ ] **Step 4: `harvester/files.py`**
+- [x] **Step 4: `harvester/files.py`**
 
 ```python
 """Файловые мелочи: снапшоты, временные картинки постов, разделы vault, MOC."""
@@ -1135,7 +1135,7 @@ def find_moc(vault: Path, section: str) -> Path | None:
     return next((p for p in (vault / section / name, vault / name) if p.exists()), None)
 ```
 
-- [ ] **Step 5: `harvester/writer.py`**
+- [x] **Step 5: `harvester/writer.py`**
 
 ```python
 """Запись одобренных черновиков в vault и откат. Существующий текст заметки не меняется никогда."""
@@ -1335,12 +1335,12 @@ class Writer:
         return "ok"
 ```
 
-- [ ] **Step 6: Тесты зелёные**
+- [x] **Step 6: Тесты зелёные**
 
 Run: `uv run pytest -q`
 Expected: PASS (все тесты задач 1-2)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
