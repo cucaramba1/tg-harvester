@@ -1483,7 +1483,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 Логика курсоров: `new_cursor` = последний собранный id в фазе «новое» (стартует с отметки прочитанного, но не ниже первого поста до `retro_until`); `retro_cursor` = id, ниже которого идём в ретро (`max_id` у Telethon исключающий). Пока у любого канала фаза `new`, ретро не начинается ни у кого.
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 `tests/test_rules.py`:
 
@@ -1637,12 +1637,12 @@ def test_live_message_is_stored_with_source_live(s, db):
     assert (row["msg_id"], row["source"], json.loads(row["media"])[0]["kind"]) == (50, "live", "photo")
 ```
 
-- [ ] **Step 2: Убедиться, что падают**
+- [x] **Step 2: Убедиться, что падают**
 
 Run: `uv run pytest tests/test_rules.py tests/test_collector.py -q`
 Expected: FAIL, `ModuleNotFoundError`
 
-- [ ] **Step 3: `harvester/rules.py`**
+- [x] **Step 3: `harvester/rules.py`**
 
 ```python
 """Дешёвые правила до любой обработки: реклама и розыгрыши."""
@@ -1654,7 +1654,7 @@ def ad_reason(text: str, markers: list[str]) -> str | None:
     return next((f"реклама: {m.lower()}" for m in markers if m.lower() in low), None)
 ```
 
-- [ ] **Step 4: `harvester/collector.py`**
+- [x] **Step 4: `harvester/collector.py`**
 
 ```python
 """Чтение каналов: фаза «новое» по всем каналам, потом ретро канал за каналом, плюс живые события.
@@ -1801,12 +1801,12 @@ class Collector:
         self._store(event.chat_id, event.message, "live")
 ```
 
-- [ ] **Step 5: Тесты зелёные**
+- [x] **Step 5: Тесты зелёные**
 
 Run: `uv run pytest -q`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
