@@ -20,8 +20,13 @@ async def _login(s) -> None:
     from telethon import TelegramClient
     s.data_dir.mkdir(parents=True, exist_ok=True)
     client = TelegramClient(str(s.session_path), s.api_id, s.api_hash)
-    await client.start()  # спросит телефон, код из Telegram и пароль 2FA прямо в терминале
+    # phone= вместо дефолта: иначе Telethon примет вставленный токен бота за телефон и войдёт ботом
+    await client.start(phone=lambda: input("Номер телефона аккаунта (+7...): "))  # дальше код и пароль 2FA
     me = await client.get_me()
+    if me.bot:
+        print("❌ Вошёл как бот, нужен личный аккаунт. Удали data/harvester.session и повтори.")
+        await client.disconnect()
+        return
     print(f"✅ Вошёл как {me.first_name}. Сессия: {s.session_path}.session")
     await client.disconnect()
 
