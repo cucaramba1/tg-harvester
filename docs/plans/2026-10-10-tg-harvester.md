@@ -2568,7 +2568,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 Бюджет: `limit = max_calls_per_night * (retro_multiplier если db.retro_active() иначе 1)`. Ретрай считается отдельным вызовом. Ошибка лимита подписки (`limit`, `usage`, `лимит` в тексте) или незапускающийся `claude` обрывает ночь, посты остаются `candidate` без штрафа.
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 `tests/test_brain.py`:
 
@@ -2714,12 +2714,12 @@ def test_images_only_without_ocr_and_capped(s, db, tmp_path):
     assert fake.calls[1][1]["tools"] == ()
 ```
 
-- [ ] **Step 2: Убедиться, что падают**
+- [x] **Step 2: Убедиться, что падают**
 
 Run: `uv run pytest tests/test_brain.py -q`
 Expected: FAIL, `ModuleNotFoundError: No module named 'harvester.brain'`
 
-- [ ] **Step 3: `harvester/brain.py`**
+- [x] **Step 3: `harvester/brain.py`**
 
 ```python
 """Ночной разбор кандидатов через claude -p с жёстким лимитом вызовов."""
@@ -2973,12 +2973,12 @@ async def run_night(s: Settings, db: DB, claude=run_claude) -> dict:
     return rep
 ```
 
-- [ ] **Step 4: Тесты зелёные**
+- [x] **Step 4: Тесты зелёные**
 
 Run: `uv run pytest -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
@@ -3005,7 +3005,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 Отправка карточек, видео-вопросов, отчётов и аудита начинается с `cards_hour` (9:00), чтобы бот не будил ночью. Алерты шлются сразу.
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 `tests/test_bot.py`:
 
@@ -3180,12 +3180,12 @@ def test_status_text(s, db):
     assert "Канал А: ретро" in text and "new: 1" in text
 ```
 
-- [ ] **Step 2: Убедиться, что падают**
+- [x] **Step 2: Убедиться, что падают**
 
 Run: `uv run pytest tests/test_bot.py -q`
 Expected: FAIL, `ModuleNotFoundError: No module named 'harvester.bot'`
 
-- [ ] **Step 3: `harvester/cards.py`**
+- [x] **Step 3: `harvester/cards.py`**
 
 ```python
 """Тексты и клавиатуры бота. Чистые функции без сети."""
@@ -3295,7 +3295,7 @@ def status_text(counts: dict, phases: list[tuple[str, str]]) -> str:
     return "\n".join(lines)
 ```
 
-- [ ] **Step 4: `harvester/bot.py`**
+- [x] **Step 4: `harvester/bot.py`**
 
 ```python
 """Бот ревью: карточки черновиков, видео-вопросы, пилот, откат, отчёты. Пишет только владельцу."""
@@ -3526,12 +3526,12 @@ def build_dispatcher(app: App) -> Dispatcher:
     return dp
 ```
 
-- [ ] **Step 5: Тесты зелёные**
+- [x] **Step 5: Тесты зелёные**
 
 Run: `uv run pytest -q`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
@@ -3552,7 +3552,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Consumes: `brain.run_claude/BrainError/chunks`, `DB.blocks_since/add_audit/kv_set`
 - Produces: `block_view(s, block) -> str | None`, `run_audit(s, db, claude=run_claude, days=7, now=datetime.now) -> dict` (отчёт также в `kv["audit_report"]`; сомнительные блоки в таблице `audits`, их показывает бот из задачи 8). Лимит вызовов: `max(1, max_calls_per_night // 2)`.
 
-- [ ] **Step 1: Падающие тесты**
+- [x] **Step 1: Падающие тесты**
 
 `tests/test_auditor.py`:
 
@@ -3590,12 +3590,12 @@ def test_audit_stops_on_error(s, db):
     assert rep["aborted"] and db.audits("new") == []
 ```
 
-- [ ] **Step 2: Убедиться, что падают**
+- [x] **Step 2: Убедиться, что падают**
 
 Run: `uv run pytest tests/test_auditor.py -q`
 Expected: FAIL, `ModuleNotFoundError: No module named 'harvester.auditor'`
 
-- [ ] **Step 3: `harvester/auditor.py`**
+- [x] **Step 3: `harvester/auditor.py`**
 
 ```python
 """Воскресный аудит: Claude перечитывает блоки за неделю и отмечает сомнительные."""
@@ -3665,12 +3665,12 @@ async def run_audit(s: Settings, db: DB, claude=run_claude, days: int = 7, now=d
     return rep
 ```
 
-- [ ] **Step 4: Тесты зелёные**
+- [x] **Step 4: Тесты зелёные**
 
 Run: `uv run pytest -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
@@ -3691,7 +3691,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Consumes: всё из задач 1-9
 - Produces: `cli.main(argv: list[str] | None = None, root: Path | None = None) -> int`; команды `login | live | night | audit | calibrate | section <имя>`; `live.run_live(s)`; `scripts/setup.sh install|restart|stop|status|logs|night-now|uninstall`
 
-- [ ] **Step 1: Падающий тест CLI**
+- [x] **Step 1: Падающий тест CLI**
 
 `tests/test_cli.py`:
 
@@ -3723,12 +3723,12 @@ def test_calibrate_command_without_labels(tmp_path, monkeypatch, capsys):
     assert "Мало разметки" in capsys.readouterr().out
 ```
 
-- [ ] **Step 2: Убедиться, что падает**
+- [x] **Step 2: Убедиться, что падает**
 
 Run: `uv run pytest tests/test_cli.py -q`
 Expected: FAIL, `ModuleNotFoundError: No module named 'harvester.cli'`
 
-- [ ] **Step 3: `harvester/live.py`**
+- [x] **Step 3: `harvester/live.py`**
 
 ```python
 """Live-процесс: Telethon-сборщик + обогатитель + матчер + бот в одном event loop."""
@@ -3821,7 +3821,7 @@ async def run_live(s: Settings) -> None:
                          _tick(app, bot), dp.start_polling(bot, handle_signals=False))
 ```
 
-- [ ] **Step 4: `harvester/cli.py` и `harvester/__main__.py`**
+- [x] **Step 4: `harvester/cli.py` и `harvester/__main__.py`**
 
 ```python
 """Точка входа: python -m harvester <команда>."""
@@ -3901,12 +3901,12 @@ from .cli import main
 sys.exit(main())
 ```
 
-- [ ] **Step 5: Тесты зелёные**
+- [x] **Step 5: Тесты зелёные**
 
 Run: `uv run pytest -q`
 Expected: PASS (все тесты проекта)
 
-- [ ] **Step 6: `scripts/setup.sh`**
+- [x] **Step 6: `scripts/setup.sh`**
 
 ```zsh
 #!/bin/zsh
@@ -3981,7 +3981,7 @@ zsh -n scripts/setup.sh && echo syntax ok
 
 Expected: `syntax ok`
 
-- [ ] **Step 7: `README.md`**
+- [x] **Step 7: `README.md`**
 
 ```markdown
 # TG Harvester
@@ -4011,7 +4011,7 @@ Expected: `syntax ok`
 - Снапшоты заметок до правок: `data/snapshots/<дата>/`, хранятся 30 дней.
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -A
