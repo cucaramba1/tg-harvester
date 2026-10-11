@@ -1831,7 +1831,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `Enricher(s, db, tg, *, ocr=ocr_image, stt=None, disk=free_gb, extract=extract_video)`: `process(post) -> status` (`filtered | enriched | new | error`), `analyze_video(post) -> None`
   - Картинки поста лежат в `data/keep/<post_id>/` до финального статуса, пути в `posts.images`.
 
-- [ ] **Step 1: Проверить OCR на маке (вручную, 1 минута)**
+- [x] **Step 1: Проверить OCR на маке (вручную, 1 минута)**
 
 ```bash
 cd "/Users/cucaramba/Claude Code/tg-harvester"
@@ -1840,7 +1840,7 @@ uv run python -c "from ocrmac import ocrmac; import inspect; print(inspect.signa
 
 Expected: в сигнатуре есть `language_preference`. Если параметр называется иначе, поправь вызов в `ocr_image` и запиши отличие в HANDOFF «Отклонения от плана».
 
-- [ ] **Step 2: `harvester/stt.py` (копия idea-bot с другим initial prompt)**
+- [x] **Step 2: `harvester/stt.py` (копия idea-bot с другим initial prompt)**
 
 ```python
 """Голос -> текст через локальный mlx_whisper: модель живёт только на время расшифровки."""
@@ -1883,7 +1883,7 @@ async def transcribe(s: Settings, audio: Path) -> str:
             return txt.read_text(encoding="utf-8").strip() if txt else ""
 ```
 
-- [ ] **Step 3: Падающие тесты**
+- [x] **Step 3: Падающие тесты**
 
 `tests/test_enricher.py`:
 
@@ -2000,12 +2000,12 @@ def test_analyze_video_failure_does_not_get_stuck(s, db):
     assert any("видео" in t for t in db.pop_alerts())
 ```
 
-- [ ] **Step 4: Убедиться, что падают**
+- [x] **Step 4: Убедиться, что падают**
 
 Run: `uv run pytest tests/test_enricher.py -q`
 Expected: FAIL, `ModuleNotFoundError: No module named 'harvester.enricher'`
 
-- [ ] **Step 5: `harvester/enricher.py`**
+- [x] **Step 5: `harvester/enricher.py`**
 
 ```python
 """Обогащение без токенов: правила, OCR картинок (macOS Vision), whisper для аудио, видео только по запросу."""
@@ -2146,12 +2146,12 @@ class Enricher:
         self.db.update_post(post["id"], extra_text=merged, video_state="done", status="enriched")
 ```
 
-- [ ] **Step 6: Тесты зелёные**
+- [x] **Step 6: Тесты зелёные**
 
 Run: `uv run pytest -q`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
