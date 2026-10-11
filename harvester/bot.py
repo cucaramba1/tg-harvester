@@ -58,13 +58,13 @@ class App:
         if not self._day_open():
             return
         for p in self.db.video_asks(10):
-            await self._send(bot, video_card(p, self.s.channel_name(p["chat_id"])), video_kb(p["id"]))
+            await self._send(bot, video_card(p, self.s.channel_name(p["chat_id"]), post_link(p["chat_id"], p["msg_id"])), video_kb(p["id"]))
             self.db.update_post(p["id"], video_state="asked")
 
     def _card(self, d):
         post = self.db.get_post(d["post_id"])
-        return (draft_card(d, post, self.s.channel_name(post["chat_id"])),
-                draft_kb(d["id"], post_link(post["chat_id"], post["msg_id"])))
+        link = post_link(post["chat_id"], post["msg_id"])
+        return draft_card(d, post, self.s.channel_name(post["chat_id"]), link), draft_kb(d["id"], link)
 
     async def send_cards(self, bot) -> None:
         if not self._day_open():
@@ -92,7 +92,7 @@ class App:
 
     async def pilot(self, bot, n: int = 50) -> None:
         for p in self.db.pilot_sample(n):
-            await self._send(bot, pilot_card(p, self.s.channel_name(p["chat_id"])), pilot_kb(p["id"]))
+            await self._send(bot, pilot_card(p, self.s.channel_name(p["chat_id"]), post_link(p["chat_id"], p["msg_id"])), pilot_kb(p["id"]))
             await asyncio.sleep(self.pause)
 
     def status(self) -> str:

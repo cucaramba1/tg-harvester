@@ -19,14 +19,20 @@ def _stem(rel: str) -> str:
     return PurePosixPath(rel).stem
 
 
+def _with_footer(body: str, footer: str, link: str, n: int = MAX) -> str:
+    """Тело карточки первым, источник и ссылка на пост в конце: заголовок не отнимает внимание сверху."""
+    return f"{_trim(body, n - len(footer) - len(link) - 8)}\n\n{footer}\n{link}"
+
+
 def where(mode: str, target: str, title: str | None = None) -> str:
     if mode == "append":
         return f"→ дописать в [[{_stem(target)}]]"
     return f"→ новая заметка в «{target}»" + (f": {title}" if title else "")
 
 
-def draft_card(d, post, channel: str) -> str:
-    return _trim(f"📌 {channel} · {post['date'][:10]}\n{where(d['mode'], d['target'], d['title'])}\n\n{d['content']}")
+def draft_card(d, post, channel: str, link: str) -> str:
+    return _with_footer(f"{where(d['mode'], d['target'], d['title'])}\n\n{d['content']}",
+                        f"📌 {channel} · {post['date'][:10]}", link)
 
 
 def draft_kb(did: int, link: str) -> K:
@@ -53,9 +59,8 @@ def confirm_kb(bid: int) -> K:
                                B(text="Отмена", callback_data=f"rbn:{bid}")]])
 
 
-def video_card(post, channel: str) -> str:
-    return _trim(f"🎬 {channel} · {post['date'][:10]}\nВидео-пост прошёл фильтр. Разобрать видео "
-                 f"(скачать, расшифровать звук, прочитать кадры)?\n\n{post['text']}", 1500)
+def video_card(post, channel: str, link: str) -> str:
+    return _with_footer(post["text"], f"🎬 {channel} · {post['date'][:10]} · разобрать видео?", link, 1500)
 
 
 def video_kb(pid: int) -> K:
@@ -63,9 +68,9 @@ def video_kb(pid: int) -> K:
                                B(text="❌ Не надо", callback_data=f"vn:{pid}")]])
 
 
-def pilot_card(post, channel: str) -> str:
+def pilot_card(post, channel: str, link: str) -> str:
     body = "\n".join(x for x in (post["text"], post["extra_text"]) if x)
-    return _trim(f"🧪 {channel} · совпадение {post['score']:.2f}\n\n{body}", 1500)
+    return _with_footer(body, f"🧪 {channel} · совпадение {post['score']:.2f}", link, 1500)
 
 
 def pilot_kb(pid: int) -> K:

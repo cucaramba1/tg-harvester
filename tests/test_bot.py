@@ -4,7 +4,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from harvester.bot import App
-from harvester.cards import draft_card
+from harvester.cards import draft_card, pilot_card, video_card
 from harvester.writer import Writer
 from tests.helpers import CHAT_A, make_draft
 
@@ -39,11 +39,13 @@ def cbs(kb):
 def test_draft_card_texts(s, db):
     did = make_draft(db, 1, "append", REL, content="x" * 5000)
     d = db.get_draft(did)
-    text = draft_card(d, db.get_post(d["post_id"]), "Канал А")
-    assert text.startswith("📌 Канал А · 2026-10-01\n→ дописать в [[Промпты]]")
+    link = "https://t.me/c/1/1"
+    text = draft_card(d, db.get_post(d["post_id"]), "Канал А", link)
+    assert text.startswith("→ дописать в [[Промпты]]")
+    assert text.endswith(f"📌 Канал А · 2026-10-01\n{link}")
     assert len(text) <= 3500
     db.update_draft(did, mode="new", target="Музыка", title="Сведение")
-    assert "→ новая заметка в «Музыка»: Сведение" in draft_card(db.get_draft(did), db.get_post(d["post_id"]), "К")
+    assert "→ новая заметка в «Музыка»: Сведение" in draft_card(db.get_draft(did), db.get_post(d["post_id"]), "К", link)
     assert "—" not in text
 
 
@@ -166,3 +168,13 @@ def test_status_text(s, db):
     db.add_post(CHAT_A, 1, None, "d", "t", None)
     text = app_at(s, db).status()
     assert "Канал А: ретро" in text and "new: 1" in text
+
+
+def test_video_and_pilot_cards_put_source_and_link_last(s, db):
+    did = make_draft(db, 1, "append", REL)
+    post = dict(db.get_post(db.get_draft(did)["post_id"]))
+    link = "https://t.me/c/1/1"
+    v = video_card(post, "Канал А", link)
+    assert v.startswith(post["text"][:20]) and v.endswith(link) and "разобрать видео?" in v
+    p = pilot_card({**post, "score": 0.5, "extra_text": None}, "Канал А", link)
+    assert p.endswith(link) and not p.startswith("🧪")
