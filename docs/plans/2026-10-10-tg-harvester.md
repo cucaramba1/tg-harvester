@@ -2178,7 +2178,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `Matcher(s, db, vectors)`: `process(post) -> status` (`candidate | explore | video_ask`)
   - `best_threshold(pairs: list[(score, useful)]) -> float | None`, `calibrate(s, db) -> dict` (пишет `data/calibration.json` и сразу меняет `s`)
 
-- [ ] **Step 1: Проверить модель эмбеддингов (вручную)**
+- [x] **Step 1: Проверить модель эмбеддингов (вручную)**
 
 ```bash
 cd "/Users/cucaramba/Claude Code/tg-harvester"
@@ -2191,7 +2191,7 @@ print([n for n in names if 'multilingual' in n.lower()])"
 
 Expected: `True`. Если `False`: выбери из напечатанного списка самую лёгкую мультиязычную модель, впиши её в `config/settings.yaml` (`embed_model`) и в HANDOFF «Отклонения». Если у выбранной модели e5-семейства нужен префикс `query: `/`passage: `, добавь его в `FastEmbedder.embed` и тоже запиши.
 
-- [ ] **Step 2: Падающие тесты**
+- [x] **Step 2: Падающие тесты**
 
 `tests/test_matcher.py`:
 
@@ -2328,12 +2328,12 @@ def test_calibrate_writes_json_and_updates_settings(s, db):
     assert s.note_threshold == 0.8
 ```
 
-- [ ] **Step 3: Убедиться, что падают**
+- [x] **Step 3: Убедиться, что падают**
 
 Run: `uv run pytest tests/test_matcher.py -q`
 Expected: FAIL, `ModuleNotFoundError: No module named 'harvester.matcher'`
 
-- [ ] **Step 4: `harvester/matcher.py`**
+- [x] **Step 4: `harvester/matcher.py`**
 
 ```python
 """Совпадение поста с vault без токенов: эмбеддинги заметок, центроиды разделов, полезность, калибровка."""
@@ -2535,12 +2535,12 @@ def calibrate(s: Settings, db: DB) -> dict:
     return res
 ```
 
-- [ ] **Step 5: Тесты зелёные**
+- [x] **Step 5: Тесты зелёные**
 
 Run: `uv run pytest -q`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
