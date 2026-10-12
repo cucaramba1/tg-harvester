@@ -178,3 +178,16 @@ def test_video_and_pilot_cards_put_source_and_link_last(s, db):
     assert v.startswith(post["text"][:20]) and v.endswith(link) and "разобрать видео?" in v
     p = pilot_card({**post, "score": 0.5, "extra_text": None}, "Канал А", link)
     assert p.endswith(link) and not p.startswith("🧪")
+
+
+def test_video_asks_capped_per_day_best_score_first(s, db):
+    for i, sc in ((1, 0.1), (2, 0.9), (3, 0.5)):
+        pid = db.add_post(CHAT_A, i, None, "2026-10-01T00:00:00+00:00", f"видео {i}", "video")
+        db.update_post(pid, status="video_ask", video_state="ask", score=sc)
+    bot = FakeBot()
+    app = app_at(s, db, hour=10)
+    asyncio.run(app.tick(bot))
+    asyncio.run(app.tick(bot))
+    assert len(bot.sent) == s.video_asks_per_day == 2
+    assert "видео 2" in bot.sent[0][1] and "видео 3" in bot.sent[1][1]
+    assert db.get_post(1)["video_state"] == "ask"

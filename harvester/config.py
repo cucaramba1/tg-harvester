@@ -56,6 +56,7 @@ class Settings:
     cards_hour: int
     snapshot_days: int
     attachments_dir: str
+    video_asks_per_day: int = 5
 
     @property
     def data_dir(self) -> Path:
@@ -147,4 +148,5 @@ def load_settings(root: Path | None = None) -> Settings:
         cards_hour=int(cfg["cards_hour"]),
         snapshot_days=int(cfg["snapshot_days"]),
         attachments_dir=str(cfg["attachments_dir"]),
+        video_asks_per_day=int(cfg.get("video_asks_per_day", 5)),
     )

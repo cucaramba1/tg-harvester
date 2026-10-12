@@ -57,9 +57,14 @@ class App:
     async def send_video_asks(self, bot) -> None:
         if not self._day_open():
             return
-        for p in self.db.video_asks(10):
-            await self._send(bot, video_card(p, self.s.channel_name(p["chat_id"]), post_link(p["chat_id"], p["msg_id"])), video_kb(p["id"]))
+        key = f"video_asks:{self.now().date().isoformat()}"
+        sent = int(self.db.kv_get(key, "0"))
+        for p in self.db.video_asks(max(0, self.s.video_asks_per_day - sent)):
+            await self._send(bot, video_card(p, self.s.channel_name(p["chat_id"]), post_link(p["chat_id"], p["msg_id"])),
+                             video_kb(p["id"]))
             self.db.update_post(p["id"], video_state="asked")
+            sent += 1
+            self.db.kv_set(key, str(sent))
 
     def _card(self, d):
         post = self.db.get_post(d["post_id"])

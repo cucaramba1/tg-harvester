@@ -137,7 +137,7 @@ class DB:
         return self.c.execute("SELECT * FROM posts WHERE status=? ORDER BY id LIMIT ?", (status, limit)).fetchall()
 
     def video_asks(self, limit: int = 10) -> list:
-        return self.c.execute("SELECT * FROM posts WHERE status='video_ask' AND video_state='ask' ORDER BY id LIMIT ?",
+        return self.c.execute("SELECT * FROM posts WHERE status='video_ask' AND video_state='ask' ORDER BY score DESC, id LIMIT ?",
                               (limit,)).fetchall()
 
     def videos_approved(self, limit: int = 5) -> list:
