@@ -221,3 +221,13 @@ def test_more_prompt_no_stops_for_the_day(s, db):
     app.handle_callback("mv:0")
     asyncio.run(app.tick(bot))
     assert len(bot.sent) == 3 and db.get_post(1)["video_state"] == "ask"
+
+
+def test_more_yes_pressed_at_night_sends_immediately(s, db):
+    _three_asks(db)
+    bot = FakeBot()
+    asyncio.run(app_at(s, db, hour=10).tick(bot))  # 2 видео + вопрос «ещё?»
+    night = app_at(s, db, hour=3)  # «Да» нажато после полуночи, день ещё закрыт
+    night.handle_callback("mv:1")
+    asyncio.run(night.tick(bot))
+    assert len(bot.sent) == 4 and "видео 1" in bot.sent[3][1]

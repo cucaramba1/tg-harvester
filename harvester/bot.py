@@ -55,22 +55,27 @@ class App:
                 self.db.kv_set(key + "_sent", raw)
 
     async def send_video_asks(self, bot) -> None:
-        if not self._day_open():
-            return
         day = self.now().date().isoformat()
-        key, extra_key, prompt_key = f"video_asks:{day}", f"video_extra:{day}", f"video_prompt:{day}"
+        key = f"video_asks:{day}"
         step = self.s.video_asks_per_day
         sent = int(self.db.kv_get(key, "0"))
-        allowance = step + int(self.db.kv_get(extra_key, "0"))
-        for p in self.db.video_asks(max(0, allowance - sent)):
+        pending = int(self.db.kv_get("video_more", "0"))  # «Да» на «полистать ещё?»: не зависит ни от даты, ни от часа
+        day_room = max(0, step - sent) if self._day_open() else 0
+        for p in self.db.video_asks(day_room + pending):
             await self._send(bot, video_card(p, self.s.channel_name(p["chat_id"]), post_link(p["chat_id"], p["msg_id"])),
                              video_kb(p["id"]))
             self.db.update_post(p["id"], video_state="asked")
-            sent += 1
-            self.db.kv_set(key, str(sent))
+            if day_room > 0:
+                day_room -= 1
+                sent += 1
+                self.db.kv_set(key, str(sent))
+            else:
+                pending -= 1
+                self.db.kv_set("video_more", str(pending))
         left = self.db.video_ask_count()
-        if sent >= allowance and left and self.db.kv_get(prompt_key) != str(allowance):
-            self.db.kv_set(prompt_key, str(allowance))  # на каждом уровне лимита спрашиваем один раз
+        token = f"{day}:{self.db.kv_get('video_yes', '0')}"  # на каждом «уровне» спрашиваем один раз
+        if self._day_open() and sent >= step and pending == 0 and left and self.db.kv_get("video_prompt") != token:
+            self.db.kv_set("video_prompt", token)
             await self._send(bot, more_text(sent, left, step), more_kb())
 
     def _card(self, d):
@@ -191,10 +196,10 @@ class App:
     def on_mv(self, yes: int):
         if not yes:
             return "Ок, на сегодня хватит", None
-        day = self.now().date().isoformat()
-        extra = int(self.db.kv_get(f"video_extra:{day}", "0")) + self.s.video_asks_per_day
-        self.db.kv_set(f"video_extra:{day}", str(extra))
-        return f"Ок, ещё {self.s.video_asks_per_day} придёт в ближайшие минуты", None
+        step = self.s.video_asks_per_day
+        self.db.kv_set("video_more", str(int(self.db.kv_get("video_more", "0")) + step))
+        self.db.kv_set("video_yes", str(int(self.db.kv_get("video_yes", "0")) + 1))
+        return f"Ок, ещё {step} придёт в ближайшие минуты", None
 
     def on_pl(self, pid: int, useful: int):
         self.db.add_label(pid, bool(useful))
