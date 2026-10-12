@@ -68,6 +68,14 @@ def video_kb(pid: int) -> K:
                                B(text="❌ Не надо", callback_data=f"vn:{pid}")]])
 
 
+def more_text(shown: int, left: int, step: int) -> str:
+    return f"Показал {shown} видео за сегодня, в очереди ещё {left}. Полистать ещё {step}?"
+
+
+def more_kb() -> K:
+    return K(inline_keyboard=[[B(text="Да", callback_data="mv:1"), B(text="Нет", callback_data="mv:0")]])
+
+
 def pilot_card(post, channel: str, link: str) -> str:
     body = "\n".join(x for x in (post["text"], post["extra_text"]) if x)
     return _with_footer(body, f"🧪 {channel} · совпадение {post['score']:.2f}", link, 1500)

@@ -11,8 +11,8 @@ from aiogram import Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
-from .cards import (alts_kb, audit_card, audit_kb, audit_text, confirm_kb, draft_card, draft_kb, night_text,
-                    pilot_card, pilot_kb, status_text, video_card, video_kb, written_kb)
+from .cards import (alts_kb, audit_card, audit_kb, audit_text, confirm_kb, draft_card, draft_kb, more_kb, more_text,
+                    night_text, pilot_card, pilot_kb, status_text, video_card, video_kb, written_kb)
 from .config import Settings
 from .db import DB
 from .files import drop_keep
@@ -57,14 +57,21 @@ class App:
     async def send_video_asks(self, bot) -> None:
         if not self._day_open():
             return
-        key = f"video_asks:{self.now().date().isoformat()}"
+        day = self.now().date().isoformat()
+        key, extra_key, prompt_key = f"video_asks:{day}", f"video_extra:{day}", f"video_prompt:{day}"
+        step = self.s.video_asks_per_day
         sent = int(self.db.kv_get(key, "0"))
-        for p in self.db.video_asks(max(0, self.s.video_asks_per_day - sent)):
+        allowance = step + int(self.db.kv_get(extra_key, "0"))
+        for p in self.db.video_asks(max(0, allowance - sent)):
             await self._send(bot, video_card(p, self.s.channel_name(p["chat_id"]), post_link(p["chat_id"], p["msg_id"])),
                              video_kb(p["id"]))
             self.db.update_post(p["id"], video_state="asked")
             sent += 1
             self.db.kv_set(key, str(sent))
+        left = self.db.video_ask_count()
+        if sent >= allowance and left and self.db.kv_get(prompt_key) != str(allowance):
+            self.db.kv_set(prompt_key, str(allowance))  # на каждом уровне лимита спрашиваем один раз
+            await self._send(bot, more_text(sent, left, step), more_kb())
 
     def _card(self, d):
         post = self.db.get_post(d["post_id"])
@@ -109,7 +116,7 @@ class App:
         kind, _, rest = data.partition(":")
         h = {"ok": self.on_ok, "no": self.on_no, "alt": self.on_alt, "back": self.on_back, "to": self.on_to,
              "rb": self.on_rb, "rby": self.on_rby, "rbn": self.on_rbn, "vy": self.on_vy, "vn": self.on_vn,
-             "pl": self.on_pl, "ab": self.on_ab, "ak": self.on_ak}.get(kind)
+             "pl": self.on_pl, "mv": self.on_mv, "ab": self.on_ab, "ak": self.on_ak}.get(kind)
         if h is None or not rest:
             return None, None
         try:
@@ -180,6 +187,14 @@ class App:
         self.db.update_post(pid, status="rejected", reason="видео: не надо", video_state="no")
         drop_keep(self.s, pid)
         return "❌ Пропускаю", None
+
+    def on_mv(self, yes: int):
+        if not yes:
+            return "Ок, на сегодня хватит", None
+        day = self.now().date().isoformat()
+        extra = int(self.db.kv_get(f"video_extra:{day}", "0")) + self.s.video_asks_per_day
+        self.db.kv_set(f"video_extra:{day}", str(extra))
+        return f"Ок, ещё {self.s.video_asks_per_day} придёт в ближайшие минуты", None
 
     def on_pl(self, pid: int, useful: int):
         self.db.add_label(pid, bool(useful))

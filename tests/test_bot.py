@@ -188,6 +188,36 @@ def test_video_asks_capped_per_day_best_score_first(s, db):
     app = app_at(s, db, hour=10)
     asyncio.run(app.tick(bot))
     asyncio.run(app.tick(bot))
-    assert len(bot.sent) == s.video_asks_per_day == 2
+    assert len(bot.sent) == s.video_asks_per_day + 1 == 3  # два видео и один вопрос «ещё?»
     assert "видео 2" in bot.sent[0][1] and "видео 3" in bot.sent[1][1]
+    assert cbs(bot.sent[2][2]["reply_markup"]) == ["mv:1", "mv:0"]
     assert db.get_post(1)["video_state"] == "ask"
+
+
+def _three_asks(db):
+    for i, sc in ((1, 0.1), (2, 0.9), (3, 0.5)):
+        pid = db.add_post(CHAT_A, i, None, "2026-10-01T00:00:00+00:00", f"видео {i}", "video")
+        db.update_post(pid, status="video_ask", video_state="ask", score=sc)
+
+
+def test_more_prompt_yes_sends_next_batch_once_asked(s, db):
+    _three_asks(db)
+    bot, app = FakeBot(), app_at(s, db, hour=10)
+    for _ in range(3):
+        asyncio.run(app.tick(bot))
+    assert len(bot.sent) == 3  # вопрос «ещё?» не повторяется
+    text, _ = app.handle_callback("mv:1")
+    assert "ещё" in text
+    asyncio.run(app.tick(bot))
+    assert len(bot.sent) == 4 and "видео 1" in bot.sent[3][1]  # очередь кончилась, нового вопроса нет
+    asyncio.run(app.tick(bot))
+    assert len(bot.sent) == 4
+
+
+def test_more_prompt_no_stops_for_the_day(s, db):
+    _three_asks(db)
+    bot, app = FakeBot(), app_at(s, db, hour=10)
+    asyncio.run(app.tick(bot))
+    app.handle_callback("mv:0")
+    asyncio.run(app.tick(bot))
+    assert len(bot.sent) == 3 and db.get_post(1)["video_state"] == "ask"
