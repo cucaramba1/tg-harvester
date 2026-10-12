@@ -108,3 +108,28 @@ def test_analyze_video_failure_does_not_get_stuck(s, db):
     row = db.get_post(p["id"])
     assert (row["status"], row["video_state"]) == ("enriched", "done")
     assert any("видео" in t for t in db.pop_alerts())
+
+
+class VideoTg(FakeTg):
+    """Тип медиа «photo», а Telegram отдаёт видео (превью ссылки): так падал живой OCR."""
+    async def download(self, chat_id, msg_id, dest):
+        p = Path(dest) / f"{msg_id}.mp4"
+        p.write_bytes(b"x")
+        return p
+
+
+def _boom(path):
+    raise ValueError("cannot identify image file")
+
+
+def test_photo_kind_with_video_file_keeps_post_text(s, db):
+    p = post(db, 4, "Длинный нормальный текст про промпты для claude и нейросети", "photo")
+    assert asyncio.run(enr(s, db, VideoTg(), ocr=_boom).process(p)) == "enriched"
+    row = db.get_post(p["id"])
+    assert row["status"] == "enriched" and json.loads(row["images"]) == []
+
+
+def test_ocr_failure_does_not_lose_post(s, db):
+    p = post(db, 5, "Длинный нормальный текст про промпты для claude и нейросети", "photo")
+    assert asyncio.run(enr(s, db, ocr=_boom).process(p)) == "enriched"
+    assert db.get_post(p["id"])["attempts"] in (0, None)

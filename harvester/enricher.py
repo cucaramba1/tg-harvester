@@ -18,6 +18,9 @@ from .stt import transcribe
 log = logging.getLogger(__name__)
 
 
+VIDEO_SUFFIXES = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
+
+
 def free_gb(path: Path = Path.home()) -> float:
     return shutil.disk_usage(path).free / 2**30
 
@@ -89,9 +92,15 @@ class Enricher:
                 p = await self.tg.download(post["chat_id"], m["msg_id"], keep)
                 if p is None:
                     continue
+                if p.suffix.lower() in VIDEO_SUFFIXES:  # тип «photo», а файл видео (превью ссылки): не картинка
+                    p.unlink(missing_ok=True)
+                    continue
                 images.append(str(p))
-                if t := await asyncio.to_thread(self.ocr, p):
-                    extra.append(t)
+                try:
+                    if t := await asyncio.to_thread(self.ocr, p):
+                        extra.append(t)
+                except Exception as e:  # битая картинка не должна терять пост с нормальным текстом
+                    log.warning("ocr post %s: %s", pid, e)
             for m in sounds:
                 extra += await self._transcribe(post["chat_id"], m["msg_id"])
         full = "\n".join([text, *extra]).strip()
