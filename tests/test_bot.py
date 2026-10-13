@@ -15,6 +15,10 @@ NOTE = "# Промпты\n"
 class FakeBot:
     def __init__(self):
         self.sent = []
+        self.deleted = []
+
+    async def delete_message(self, chat_id, message_id):
+        self.deleted.append(message_id)
 
     async def send_message(self, chat_id, text, **kw):
         self.sent.append((chat_id, text, kw))
@@ -188,10 +192,19 @@ def test_video_asks_capped_per_day_best_score_first(s, db):
     app = app_at(s, db, hour=10)
     asyncio.run(app.tick(bot))
     asyncio.run(app.tick(bot))
-    assert len(bot.sent) == s.video_asks_per_day + 1 == 3  # два видео и один вопрос «ещё?»
+    assert len(bot.sent) == s.video_asks_per_day == 2  # пока не ответил на видео, вопроса «ещё?» нет
+    _answer_asked(app, db)
+    asyncio.run(app.tick(bot))
+    assert len(bot.sent) == 3  # два видео и один вопрос «ещё?»
     assert "видео 2" in bot.sent[0][1] and "видео 3" in bot.sent[1][1]
     assert cbs(bot.sent[2][2]["reply_markup"]) == ["mv:1", "mv:0"]
     assert db.get_post(1)["video_state"] == "ask"
+
+
+def _answer_asked(app, db):
+    """Нажать «Разобрать» на всех выданных видео-карточках."""
+    for r in db.c.execute("SELECT id FROM posts WHERE video_state='asked'").fetchall():
+        app.handle_callback(f"vy:{r['id']}")
 
 
 def _three_asks(db):
@@ -203,6 +216,8 @@ def _three_asks(db):
 def test_more_prompt_yes_sends_next_batch_once_asked(s, db):
     _three_asks(db)
     bot, app = FakeBot(), app_at(s, db, hour=10)
+    asyncio.run(app.tick(bot))
+    _answer_asked(app, db)
     for _ in range(3):
         asyncio.run(app.tick(bot))
     assert len(bot.sent) == 3  # вопрос «ещё?» не повторяется
@@ -218,6 +233,8 @@ def test_more_prompt_no_stops_for_the_day(s, db):
     _three_asks(db)
     bot, app = FakeBot(), app_at(s, db, hour=10)
     asyncio.run(app.tick(bot))
+    _answer_asked(app, db)
+    asyncio.run(app.tick(bot))
     app.handle_callback("mv:0")
     asyncio.run(app.tick(bot))
     assert len(bot.sent) == 3 and db.get_post(1)["video_state"] == "ask"
@@ -226,8 +243,45 @@ def test_more_prompt_no_stops_for_the_day(s, db):
 def test_more_yes_pressed_at_night_sends_immediately(s, db):
     _three_asks(db)
     bot = FakeBot()
-    asyncio.run(app_at(s, db, hour=10).tick(bot))  # 2 видео + вопрос «ещё?»
+    day = app_at(s, db, hour=10)
+    asyncio.run(day.tick(bot))
+    _answer_asked(day, db)
+    asyncio.run(day.tick(bot))  # 2 видео + вопрос «ещё?»
     night = app_at(s, db, hour=3)  # «Да» нажато после полуночи, день ещё закрыт
     night.handle_callback("mv:1")
     asyncio.run(night.tick(bot))
     assert len(bot.sent) == 4 and "видео 1" in bot.sent[3][1]
+
+
+def test_more_prompt_is_always_the_last_message(s, db):
+    _three_asks(db)
+    make_draft(db, 10, "append", REL)
+    bot, app = FakeBot(), app_at(s, db, hour=10)
+    asyncio.run(app.tick(bot))  # видео-карточки и черновик
+    _answer_asked(app, db)
+    asyncio.run(app.tick(bot))  # вопрос «ещё?» после ответов
+    assert cbs(bot.sent[-1][2]["reply_markup"]) == ["mv:1", "mv:0"]
+    first_prompt = len(bot.sent)
+    make_draft(db, 11, "append", REL)
+    asyncio.run(app.tick(bot))  # пришла новая карточка: вопрос переезжает вниз
+    assert bot.deleted == [first_prompt]
+    assert cbs(bot.sent[-1][2]["reply_markup"]) == ["mv:1", "mv:0"] and len(bot.sent) == first_prompt + 2
+    asyncio.run(app.tick(bot))  # ничего нового: вопрос не дублируется
+    assert len(bot.sent) == first_prompt + 2 and bot.deleted == [first_prompt]
+    app.handle_callback("mv:0")
+    db.push_alert("ночной алерт")
+    asyncio.run(app.tick(bot))  # после ответа вопрос больше не возвращается
+    assert bot.sent[-1][1] == "ночной алерт" and len(bot.sent) == first_prompt + 3
+
+
+def test_more_prompt_deleted_at_midnight_if_unanswered(s, db):
+    _three_asks(db)
+    bot, app = FakeBot(), app_at(s, db, hour=10)
+    asyncio.run(app.tick(bot))
+    _answer_asked(app, db)
+    asyncio.run(app.tick(bot))
+    prompt_id = len(bot.sent)
+    assert cbs(bot.sent[-1][2]["reply_markup"]) == ["mv:1", "mv:0"]
+    next_day = App(s, db, Writer(s, db), now=lambda: datetime(2026, 10, 12, 0, 0), pause=0)
+    asyncio.run(next_day.tick(bot))
+    assert bot.deleted == [prompt_id] and len(bot.sent) == prompt_id

@@ -28,14 +28,18 @@ class App:
         self.s, self.db, self.writer, self.now, self.pause = s, db, writer, now, pause
 
     # --- исходящие
-    async def _send(self, bot, text: str, kb=None):
-        return await bot.send_message(self.s.owner_id, text, reply_markup=kb, link_preview_options=NO_PREVIEW)
+    async def _send(self, bot, text: str, kb=None, *, prompt: bool = False):
+        msg = await bot.send_message(self.s.owner_id, text, reply_markup=kb, link_preview_options=NO_PREVIEW)
+        if not prompt and self.db.kv_get("more_msg"):
+            self.db.kv_set("more_stale", "1")  # после вопроса «ещё?» ушло другое сообщение: перенесём вопрос вниз
+        return msg
 
     def _day_open(self) -> bool:
         return self.now().hour >= self.s.cards_hour
 
     async def tick(self, bot) -> None:
-        for step in (self.send_alerts, self.send_reports, self.send_video_asks, self.send_cards, self.send_audits):
+        for step in (self.send_alerts, self.send_reports, self.send_video_asks, self.send_cards, self.send_audits,
+                     self.send_more_prompt):
             try:
                 await step(bot)
             except Exception:
@@ -72,11 +76,46 @@ class App:
             else:
                 pending -= 1
                 self.db.kv_set("video_more", str(pending))
+
+    async def _drop_prompt(self, bot) -> None:
+        old = self.db.kv_get("more_msg")
+        if old:
+            try:
+                await bot.delete_message(self.s.owner_id, int(old))
+            except Exception:
+                log.warning("не удалил старый вопрос «ещё?» %s", old)
+        for k in ("more_msg", "more_day", "more_stale"):
+            self.db.kv_set(k, "")
+
+    async def send_more_prompt(self, bot) -> None:
+        """«Полистать ещё?» всегда последнее сообщение: последний шаг тика, а если после него что-то ушло, переотправляем.
+        Появляется, только когда на все выданные видео отвечено; в полночь без ответа удаляется."""
+        day = self.now().date().isoformat()
+        step = self.s.video_asks_per_day
         left = self.db.video_ask_count()
+        old = self.db.kv_get("more_msg")
+        if old:
+            if self.db.kv_get("more_day") != day or not left:
+                return await self._drop_prompt(bot)
+            if self.db.kv_get("more_stale") != "1":
+                return
+            await self._drop_prompt(bot)
+            ask = True
+        else:
+            ask = False
+        sent = int(self.db.kv_get(f"video_asks:{day}", "0"))
+        pending = int(self.db.kv_get("video_more", "0"))
         token = f"{day}:{self.db.kv_get('video_yes', '0')}"  # на каждом «уровне» спрашиваем один раз
-        if self._day_open() and sent >= step and pending == 0 and left and self.db.kv_get("video_prompt") != token:
-            self.db.kv_set("video_prompt", token)
-            await self._send(bot, more_text(sent, left, step), more_kb())
+        if not ask:
+            ask = (self._day_open() and sent >= step and pending == 0 and left and not self.db.video_asked_count()
+                   and self.db.kv_get("video_prompt") != token)
+        if not ask:
+            return
+        self.db.kv_set("video_prompt", token)
+        msg = await self._send(bot, more_text(sent, left, step), more_kb(), prompt=True)
+        self.db.kv_set("more_msg", str(msg.message_id))
+        self.db.kv_set("more_day", day)
+        self.db.kv_set("more_stale", "")
 
     def _card(self, d):
         post = self.db.get_post(d["post_id"])
@@ -194,6 +233,8 @@ class App:
         return "❌ Пропускаю", None
 
     def on_mv(self, yes: int):
+        self.db.kv_set("more_msg", "")
+        self.db.kv_set("more_stale", "")
         if not yes:
             return "Ок, на сегодня хватит", None
         step = self.s.video_asks_per_day
