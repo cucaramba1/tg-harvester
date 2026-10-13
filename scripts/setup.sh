@@ -1,6 +1,6 @@
 #!/bin/zsh
 # TG Harvester: автозапуск трёх процессов.
-#   scripts/setup.sh install | restart | stop | status | logs | night-now | uninstall
+#   scripts/setup.sh install | bot-only | restart | stop | status | logs | night-now | uninstall
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -50,6 +50,13 @@ case "${1:-install}" in
     done
     echo "✅ TG Harvester установлен: live работает, ночь в 03:00, аудит по воскресеньям в 04:00"
     ;;
+  bot-only)  # только бот ревью, без сбора и ночи: сервис не растит диск
+    cd "$ROOT"
+    write_plist "$BASE" bot "<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>30</integer>"
+    launchctl bootout "$DOMAIN/$BASE" 2>/dev/null || true
+    launchctl bootstrap "$DOMAIN" "$(plist_path "$BASE")"
+    echo "🤖 запущен только бот (сбор и ночь выключены). Полный запуск: scripts/setup.sh install"
+    ;;
   restart) launchctl kickstart -k "$DOMAIN/$BASE" && echo "🔄 live перезапущен" ;;
   stop) for l in $LABELS; do launchctl bootout "$DOMAIN/$l" 2>/dev/null || true; done; echo "⏹ остановлен" ;;
   status) for l in $LABELS; do echo "== $l"; launchctl print "$DOMAIN/$l" 2>/dev/null | grep -E "state|pid|last exit" || echo "не загружен"; done ;;
@@ -59,5 +66,5 @@ case "${1:-install}" in
     for l in $LABELS; do launchctl bootout "$DOMAIN/$l" 2>/dev/null || true; rm -f "$(plist_path "$l")"; done
     echo "🗑 автозапуск удалён, data/ не тронута"
     ;;
-  *) echo "usage: $0 install|restart|stop|status|logs|night-now|uninstall"; exit 1 ;;
+  *) echo "usage: $0 install|bot-only|restart|stop|status|logs|night-now|uninstall"; exit 1 ;;
 esac

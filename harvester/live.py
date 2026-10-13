@@ -86,3 +86,15 @@ async def run_live(s: Settings) -> None:
     log.info("TG Harvester запущен")
     await asyncio.gather(_collect(col), _process(db, Enricher(s, db, tg), Matcher(s, db, vectors), vectors),
                          _tick(app, bot), dp.start_polling(bot, handle_signals=False))
+
+
+async def run_bot(s: Settings) -> None:
+    """Только бот ревью: очередь карточек и видео-вопросов из базы. Без Telethon, моделей, сбора и обработки."""
+    from aiogram import Bot
+
+    db = DB(s.db_path)
+    bot = Bot(s.bot_token)
+    app = App(s, db, Writer(s, db))
+    dp = build_dispatcher(app)
+    log.info("TG Harvester: режим «только бот»")
+    await asyncio.gather(_tick(app, bot), dp.start_polling(bot, handle_signals=False))

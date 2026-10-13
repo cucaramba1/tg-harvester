@@ -34,7 +34,7 @@ async def _login(s) -> None:
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     p = argparse.ArgumentParser(prog="harvester")
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("login", "live", "night", "audit", "calibrate"):
+    for name in ("login", "live", "bot", "night", "audit", "calibrate"):
         sub.add_parser(name)
     sec = sub.add_parser("section")
     sec.add_argument("name")
@@ -51,6 +51,9 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     elif a.cmd == "live":
         from .live import run_live
         asyncio.run(run_live(s))
+    elif a.cmd == "bot":
+        from .live import run_bot
+        asyncio.run(run_bot(s))
     elif a.cmd == "night":
         from .brain import run_night
         from .db import DB

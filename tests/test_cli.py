@@ -23,3 +23,16 @@ def test_calibrate_command_without_labels(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("VAULT_DIR", str(tmp_path))
     assert main(["calibrate"], root=tmp_path) == 0
     assert "Мало разметки" in capsys.readouterr().out
+
+
+def test_bot_command_runs_bot_only(tmp_path, monkeypatch):
+    shutil.copytree(REPO / "config", tmp_path / "config")
+    monkeypatch.setenv("VAULT_DIR", str(tmp_path))
+    called = []
+
+    async def fake_run_bot(s):
+        called.append(s)
+
+    monkeypatch.setattr("harvester.live.run_bot", fake_run_bot)
+    assert main(["bot"], root=tmp_path) == 0
+    assert len(called) == 1
