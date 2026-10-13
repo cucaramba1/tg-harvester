@@ -57,6 +57,7 @@ class Settings:
     snapshot_days: int
     attachments_dir: str
     video_asks_per_day: int = 5
+    max_keep_gb: float = 1.0
 
     @property
     def data_dir(self) -> Path:
@@ -149,4 +150,5 @@ def load_settings(root: Path | None = None) -> Settings:
         snapshot_days=int(cfg["snapshot_days"]),
         attachments_dir=str(cfg["attachments_dir"]),
         video_asks_per_day=int(cfg.get("video_asks_per_day", 5)),
+        max_keep_gb=float(cfg.get("max_keep_gb", 1.0)),
     )

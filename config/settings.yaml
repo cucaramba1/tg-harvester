@@ -10,6 +10,7 @@ min_chars: 80
 ad_markers: ["erid", "#реклама", "на правах рекламы", "розыгрыш", "промокод", "#ad"]
 max_images: 4
 min_free_gb: 10
+max_keep_gb: 1           # потолок data/keep (скачанные картинки и кадры), при превышении медиа пропускаем
 embed_model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
 note_threshold: 0.6        # перекрывается data/calibration.json
 section_threshold: 0.45

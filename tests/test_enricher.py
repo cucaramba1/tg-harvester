@@ -133,3 +133,15 @@ def test_ocr_failure_does_not_lose_post(s, db):
     p = post(db, 5, "Длинный нормальный текст про промпты для claude и нейросети", "photo")
     assert asyncio.run(enr(s, db, ocr=_boom).process(p)) == "enriched"
     assert db.get_post(p["id"])["attempts"] in (0, None)
+
+
+def test_media_skipped_when_keep_dir_over_limit(s, db):
+    import dataclasses
+    s2 = dataclasses.replace(s, max_keep_gb=0.000001)  # около 1 КБ
+    s2.keep_dir.mkdir(parents=True, exist_ok=True)
+    (s2.keep_dir / "old.bin").write_bytes(b"x" * 5000)
+    tg = FakeTg()
+    p = post(db, 6, "Длинный нормальный текст про промпты для claude и нейросети", "photo")
+    assert asyncio.run(enr(s2, db, tg).process(p)) == "enriched"
+    assert tg.calls == [] and json.loads(db.get_post(p["id"])["images"]) == []
+    assert any("медиа" in a["text"] for a in db.c.execute("select text from alerts").fetchall())

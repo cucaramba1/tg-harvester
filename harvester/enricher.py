@@ -21,6 +21,10 @@ log = logging.getLogger(__name__)
 VIDEO_SUFFIXES = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
 
 
+def dir_gb(path: Path) -> float:
+    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file()) / 1e9 if path.exists() else 0.0
+
+
 def free_gb(path: Path = Path.home()) -> float:
     return shutil.disk_usage(path).free / 2**30
 
@@ -67,12 +71,17 @@ class Enricher:
             return "new"
 
     def _disk_ok(self) -> bool:
+        if dir_gb(self.s.keep_dir) >= self.s.max_keep_gb:
+            return self._alert_once("keep_alert", f"🗂 Папка медиа дошла до {self.s.max_keep_gb:g} GB: медиа пропускаю, текст обрабатываю")
         if self.disk() >= self.s.min_free_gb:
             return True
+        return self._alert_once("disk_alert", f"💾 На диске меньше {self.s.min_free_gb:g} GB: медиа пропускаю, текст обрабатываю")
+
+    def _alert_once(self, key: str, text: str) -> bool:
         today = date.today().isoformat()
-        if self.db.kv_get("disk_alert") != today:
-            self.db.kv_set("disk_alert", today)
-            self.db.push_alert(f"💾 На диске меньше {self.s.min_free_gb:g} GB: медиа пропускаю, текст обрабатываю")
+        if self.db.kv_get(key) != today:
+            self.db.kv_set(key, today)
+            self.db.push_alert(text)
         return False
 
     async def _process(self, post) -> str:
