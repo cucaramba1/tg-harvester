@@ -60,7 +60,9 @@ async def _topics_prep(s: Settings, db: DB, tg) -> None:
         try:
             meta = await fetch_meta(tg, db, 100)
             tagged = await tag_topics(s, db, run_router, 80) if s.video_by_topic else 0
-            await asyncio.sleep(20 if (meta or tagged) else 900)  # лимиты бесплатных моделей плавающие, не давим
+            stuck = s.video_by_topic and not tagged and bool(db.queue_without_topic(1))
+            # лимиты бесплатных моделей плавающие: после неудачи ждём подольше, ночному разбору роутер тоже нужен
+            await asyncio.sleep(600 if stuck else 20 if (meta or tagged) else 900)
         except Exception:
             log.exception("topics_prep")
             await asyncio.sleep(120)
