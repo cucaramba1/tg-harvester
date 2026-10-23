@@ -12,6 +12,7 @@ from .config import Settings
 from .db import DB
 from .enricher import Enricher
 from .matcher import FastEmbedder, Matcher, VaultVectors
+from .topic_check import run_topic_checks
 from .topics import fetch_meta, tag_topics
 from .writer import Writer
 
@@ -65,6 +66,18 @@ async def _topics_prep(s: Settings, db: DB, tg) -> None:
             await asyncio.sleep(120)
 
 
+async def _topic_checks(s: Settings, db: DB, tg) -> None:
+    """Ночная проверка тем, которые Некит отметил кнопкой. Окно и бюджет внутри run_topic_checks."""
+    from .brain import run_router
+    while True:
+        try:
+            if s.video_by_topic:
+                await run_topic_checks(s, db, tg, run_router)
+        except Exception:
+            log.exception("topic_checks")
+        await asyncio.sleep(600)
+
+
 async def _tick(app: App, bot) -> None:
     while True:
         await app.tick(bot)
@@ -99,7 +112,8 @@ async def run_live(s: Settings) -> None:
     dp = build_dispatcher(app)
     log.info("TG Harvester запущен")
     await asyncio.gather(_collect(col), _process(db, Enricher(s, db, tg), Matcher(s, db, vectors), vectors),
-                         _topics_prep(s, db, tg), _tick(app, bot), dp.start_polling(bot, handle_signals=False))
+                         _topics_prep(s, db, tg), _topic_checks(s, db, tg),
+                         _tick(app, bot), dp.start_polling(bot, handle_signals=False))
 
 
 async def run_bot(s: Settings) -> None:

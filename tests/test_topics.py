@@ -179,3 +179,84 @@ def test_show_three_sends_distinct_files_as_ordinary_video_cards(tmp_path, db):
     docs = {db.get_meta(p)["doc_id"] for p in ids if db.get_post(p)["video_state"] == "asked"}
     assert len(docs) == 3                                    # три разных файла, не повторы
     assert cbs(shown[0][2]["reply_markup"])[0].startswith("vy:")
+
+
+# --- пачка 3: итоговая карточка темы и запись
+
+def make_vault_section(s, name="Фитнес и здоровье"):
+    (s.vault / name).mkdir(exist_ok=True)
+    (s.vault / f"{name}.canvas").write_text('{"nodes":[],"edges":[]}', "utf-8")
+
+
+def checked_topic(db, tmp_path, **over):
+    s = topical(tmp_path, **{"topic_default_target": "Фитнес и здоровье", **over})
+    make_vault_section(s)
+    ids = seed(db, "шея", 4)
+    report = {"topic": "шея", "total": 4, "files": 3,
+              "groups": [{"title": "наклоны шеи", "note": "10 повторов", "posts": [ids[0], ids[1]], "count": 2},
+                         {"title": "самомассаж", "note": "", "posts": [ids[2]], "count": 1}],
+              "undescribed": [{"post_id": ids[3], "caption": "немое видео"}]}
+    tid = db.ensure_topic_state("шея")
+    db.set_topic_state(tid, "checked", report=json.dumps(report, ensure_ascii=False))
+    return s, ids, tid
+
+
+def test_report_card_lists_groups_and_undescribed_with_two_buttons(tmp_path, db):
+    s, ids, tid = checked_topic(db, tmp_path)
+    bot = FakeBot()
+    app = app_at(s, db, hour=10)
+    asyncio.run(app.tick(bot))
+    asyncio.run(app.tick(bot))
+    cards = [m for m in bot.sent if "итог проверки" in m[1]]
+    assert len(cards) == 1
+    text = cards[0][1]
+    assert "наклоны шеи" in text and "самомассаж" in text and "немое видео" in text
+    assert "4 видео" in text and "3" in text                     # всего видео и разных файлов
+    assert cbs(cards[0][2]["reply_markup"]) == [f"tw:{tid}", f"tn:{tid}"]
+    assert db.topic_state_of("шея") == "reported"
+
+
+def test_write_topic_creates_one_draft_and_closes_the_rest(tmp_path, db):
+    s, ids, tid = checked_topic(db, tmp_path)
+    app = app_at(s, db, hour=10)
+    asyncio.run(app.tick(FakeBot()))
+    text, kb = app.handle_callback(f"tw:{tid}")
+    assert "Черновик" in text and kb is None
+    drafts = db.drafts("drafted")
+    assert len(drafts) == 1
+    d = drafts[0]
+    assert (d["mode"], d["target"], d["post_id"]) == ("new", "Фитнес и здоровье", ids[0])
+    assert "наклоны шеи" in d["content"] and "самомассаж" in d["content"] and "немое видео" not in d["content"]
+    assert db.get_post(ids[0])["status"] == "drafted"
+    for p in ids[1:]:
+        assert db.get_post(p)["status"] == "rejected" and db.get_post(p)["video_state"] == "done"
+    assert db.topic_state_of("шея") == "written"
+    assert app.handle_callback(f"tw:{tid}") == ("Уже обработано", None)      # повторное нажатие
+
+
+def test_write_topic_refuses_when_target_section_missing(tmp_path, db):
+    s, ids, tid = checked_topic(db, tmp_path, topic_default_target="Нет такого раздела")
+    app = app_at(s, db, hour=10)
+    asyncio.run(app.tick(FakeBot()))
+    text, kb = app.handle_callback(f"tw:{tid}")
+    assert "раздел" in text.lower() and db.drafts("drafted") == []
+    assert db.topic_state_of("шея") == "reported"                          # можно повторить после правки настройки
+
+
+def test_skip_topic_report_closes_it(tmp_path, db):
+    s, ids, tid = checked_topic(db, tmp_path)
+    app = app_at(s, db, hour=10)
+    asyncio.run(app.tick(FakeBot()))
+    text, kb = app.handle_callback(f"tn:{tid}")
+    assert "закрыта" in text and db.topic_state_of("шея") == "closed" and db.drafts("drafted") == []
+    assert all(db.get_post(p)["status"] == "rejected" for p in ids)
+
+
+def test_auto_review_writes_draft_without_asking(tmp_path, db):
+    s, ids, tid = checked_topic(db, tmp_path, topic_review="auto")
+    bot = FakeBot()
+    asyncio.run(app_at(s, db, hour=10).tick(bot))
+    assert len(db.drafts("drafted")) + len(db.drafts("sent")) == 1
+    note = [m for m in bot.sent if "шея" in m[1] and "черновик" in m[1].lower()]
+    assert note and note[0][2].get("reply_markup") is None
+    assert db.topic_state_of("шея") == "written"

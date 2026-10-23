@@ -35,3 +35,10 @@ video_calib_top: 6
 video_auto: off            # off | dry | on: автоответы по видео (правило в harvester/autovideo.py)
 video_auto_conf: 0.9
 video_auto_min_n: 8
+video_by_topic: true       # видео-вопросы по темам: карточка на тему вместо вопроса по каждому видео
+topic_cards_per_day: 10    # карточек тем в день
+topic_min_size: 2          # тема меньше этого размера спрашивается по одному видео
+topic_review: list         # list: после проверки темы показать список и спросить; auto: сразу писать черновик
+topic_check_per_night: 30  # уникальных видео за ночь (окно 01-07), Whisper по одному
+topic_silent_db: -60       # тише этого Whisper не зовём (на тишине он выдаёт мусор)
+topic_default_target: Фитнес и здоровье   # куда по умолчанию просится заметка по теме

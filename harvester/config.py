@@ -81,6 +81,7 @@ class Settings:
     topic_review: str = "list"
     topic_check_per_night: int = 30
     topic_silent_db: float = -60.0
+    topic_default_target: str = "Фитнес и здоровье"
     video_auto: str = "off"
     video_auto_conf: float = 0.9
     video_auto_min_n: int = 8
@@ -198,6 +199,7 @@ def load_settings(root: Path | None = None) -> Settings:
         topic_review=str(cfg.get("topic_review", "list")),
         topic_check_per_night=int(cfg.get("topic_check_per_night", 30)),
         topic_silent_db=float(cfg.get("topic_silent_db", -60.0)),
+        topic_default_target=str(cfg.get("topic_default_target", "Фитнес и здоровье")),
         router_tail_batches=int(cfg.get("router_tail_batches", 0)),
         video_auto=str(cfg.get("video_auto", "off")),
         video_auto_conf=float(cfg.get("video_auto_conf", 0.9)),

@@ -12,12 +12,13 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
 from .autovideo import calibration_picks
+from .brain import alternatives
 from .cards import (REASONS, alts_kb, audit_card, audit_kb, audit_text, confirm_kb, draft_card, draft_kb, more_kb,
                     more_text, night_text, pilot_card, pilot_kb, reason_kb, status_text, topic_card, topic_kb,
-                    video_card, video_kb, written_kb)
+                    topic_report_card, topic_report_kb, video_card, video_kb, written_kb)
 from .config import Settings
 from .db import DB
-from .files import drop_keep
+from .files import drop_keep, list_sections
 from .matcher import calibrate
 from .writer import WriteError, Writer, post_link
 
@@ -40,7 +41,7 @@ class App:
         return self.now().hour >= self.s.cards_hour
 
     async def tick(self, bot) -> None:
-        for step in (self.send_alerts, self.send_reports, self.send_topic_asks, self.send_topic_samples,
+        for step in (self.send_alerts, self.send_reports, self.send_topic_asks, self.send_topic_samples, self.send_topic_reports,
                      self.send_video_asks, self.send_cards, self.send_audits,
                      self.send_more_prompt):
             try:
@@ -103,6 +104,47 @@ class App:
                                  video_kb(pid))
                 self.db.update_post(pid, video_state="asked")
             self.db.kv_set(key, "")
+
+    async def send_topic_reports(self, bot) -> None:
+        """Итог проверки темы: список с кнопками, а в режиме topic_review=auto сразу черновик."""
+        if not self._day_open():
+            return
+        for t in self.db.c.execute("SELECT * FROM topic_state WHERE state='checked' AND report IS NOT NULL").fetchall():
+            rep = json.loads(t["report"])
+            if self.s.topic_review == "auto":
+                err = self._topic_to_draft(t["id"])
+                note = "📝 Записал черновик, он придёт карточкой" if err is None else f"⚠️ {err}"
+                await self._send(bot, f"{topic_report_card(rep)}\n\n{note}")
+                continue
+            msg = await self._send(bot, topic_report_card(rep), topic_report_kb(t["id"]))
+            self.db.set_topic_state(t["id"], "reported", msg_id=msg.message_id)
+
+    def _topic_to_draft(self, tid: int) -> str | None:
+        """Одна общая заметка по теме обычным черновиком (дальше ✅/✏️ как всегда). Ошибка текстом, иначе None."""
+        t = self.db.topic_by_id(tid)
+        rep = json.loads(t["report"])
+        if not rep["groups"]:
+            return "в теме нечего записывать: у всех видео нет описания"
+        sections = list_sections(self.s.vaults)
+        first = self.db.get_post(rep["groups"][0]["posts"][0])
+        target = first["target"] if first["mode"] == "new" and first["target"] in sections else self.s.topic_default_target
+        if target not in sections:
+            return f"раздела «{target}» нет в vault, поправь topic_default_target"
+        lines = []
+        for g in rep["groups"]:
+            times = f" (в {g['count']} видео)" if g["count"] > 1 else ""
+            lines.append(f"- **{g['title']}**{times}" + (f": {g['note']}" if g["note"] else ""))
+        self.db.add_draft(first["id"], "new", target, t["topic"].capitalize(), "\n".join(lines), False,
+                          alternatives(first, sections, self.s.vaults))
+        posts = {p for g in rep["groups"] for p in g["posts"]} | {u["post_id"] for u in rep["undescribed"]}
+        for pid in posts:
+            if pid == first["id"]:
+                self.db.update_post(pid, status="drafted", video_state="done")
+            else:
+                self.db.update_post(pid, status="rejected", reason=f"тема «{t['topic']}»: в общей заметке", video_state="done")
+                drop_keep(self.s, pid)
+        self.db.set_topic_state(tid, "written")
+        return None
 
     def _distinct_files(self, topic: str, n: int) -> list[int]:
         seen, out = set(), []
@@ -219,6 +261,7 @@ class App:
         h = {"ok": self.on_ok, "no": self.on_no, "alt": self.on_alt, "back": self.on_back, "to": self.on_to,
              "rb": self.on_rb, "rby": self.on_rby, "rbn": self.on_rbn, "vy": self.on_vy, "vn": self.on_vn, "vr": self.on_vr,
              "tc": self.on_tc, "t3": self.on_t3, "tx": self.on_tx,
+             "tw": self.on_tw, "tn": self.on_tn,
              "pl": self.on_pl, "mv": self.on_mv, "ab": self.on_ab, "ak": self.on_ak}.get(kind)
         if h is None or not rest:
             return None, None
@@ -303,6 +346,25 @@ class App:
             drop_keep(self.s, p["id"])
         self.db.set_topic_state(tid, "closed")
         return f"🚫 Тема «{t['topic']}» закрыта, видео: {len(posts)}", None
+
+    def on_tw(self, tid: int):
+        t = self.db.topic_by_id(tid)
+        if t is None or t["state"] != "reported":
+            return "Уже обработано", None
+        err = self._topic_to_draft(tid)
+        return (f"⚠️ {err}", topic_report_kb(tid)) if err else ("📝 Черновик создан, придёт карточкой", None)
+
+    def on_tn(self, tid: int):
+        t = self.db.topic_by_id(tid)
+        if t is None or t["state"] != "reported":
+            return "Уже обработано", None
+        rep = json.loads(t["report"])
+        posts = {p for g in rep["groups"] for p in g["posts"]} | {u["post_id"] for u in rep["undescribed"]}
+        for pid in posts:
+            self.db.update_post(pid, status="rejected", reason="тема: итог не нужен", video_state="done")
+            drop_keep(self.s, pid)
+        self.db.set_topic_state(tid, "closed")
+        return f"🗑 Тема «{t['topic']}» закрыта, видео: {len(posts)}", None
 
     def on_tc(self, tid: int):
         t = self.db.topic_by_id(tid)

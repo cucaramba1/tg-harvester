@@ -83,6 +83,24 @@ def topic_kb(tid: int, with_samples: bool = True) -> K:
     return K(inline_keyboard=[row])
 
 
+def topic_report_card(rep: dict) -> str:
+    lines = [f"🧩 {rep['topic']}: итог проверки",
+             f"{rep['total']} видео, разных файлов {rep['files']}, "
+             f"разных упражнений и советов {len(rep['groups'])}, без описания {len(rep['undescribed'])}", ""]
+    for i, g in enumerate(rep["groups"], 1):
+        times = f" (×{g['count']})" if g["count"] > 1 else ""
+        lines.append(f"{i}. {g['title']}{times}" + (f": {g['note']}" if g["note"] else ""))
+    if rep["undescribed"]:
+        lines += ["", "Без описания (ни речи, ни текста, смотреть самому):"]
+        lines += [f" • {_trim(u['caption'] or '(без подписи)', 90)}" for u in rep["undescribed"][:8]]
+    return _trim("\n".join(lines))
+
+
+def topic_report_kb(tid: int) -> K:
+    return K(inline_keyboard=[[B(text="📝 Записать в заметку", callback_data=f"tw:{tid}"),
+                               B(text="🗑 Не надо", callback_data=f"tn:{tid}")]])
+
+
 REASONS = {1: "неинтересно", 2: "дубль", 3: "реклама"}
 
 
