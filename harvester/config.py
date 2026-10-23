@@ -78,6 +78,7 @@ class Settings:
     video_by_topic: bool = False
     topic_cards_per_day: int = 10
     topic_min_size: int = 2
+    topic_max_size: int = 40
     topic_review: str = "list"
     topic_check_per_night: int = 30
     topic_silent_db: float = -60.0
@@ -196,6 +197,7 @@ def load_settings(root: Path | None = None) -> Settings:
         video_by_topic=bool(cfg.get("video_by_topic", False)),
         topic_cards_per_day=int(cfg.get("topic_cards_per_day", 10)),
         topic_min_size=int(cfg.get("topic_min_size", 2)),
+        topic_max_size=int(cfg.get("topic_max_size", 40)),
         topic_review=str(cfg.get("topic_review", "list")),
         topic_check_per_night=int(cfg.get("topic_check_per_night", 30)),
         topic_silent_db=float(cfg.get("topic_silent_db", -60.0)),

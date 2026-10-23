@@ -75,3 +75,43 @@ async def tag_topics(s: Settings, db: DB, router, limit: int = 80) -> int:
             db.set_topic(pid, topic)
             n += 1
     return n
+
+
+SPLIT_SYSTEM = ("Тебе дают посты на одну широкую тему. Раздели их на узкие подтемы: конкретная часть тела, проблема, "
+                "инструмент или жанр, примерно по 5-40 постов в каждой. Одинаковые по смыслу посты получают ОДИНАКОВОЕ "
+                "название подтемы (1-3 слова, строчными, без названия родительской темы). Если подходит подтема из "
+                "списка существующих, используй её дословно.")
+
+
+async def split_big_topics(s: Settings, db: DB, router, limit: int = 80) -> int:
+    """Одна слишком широкая тема за вызов: порция её постов раскладывается по подтемам «тема: подтема».
+    Три пустых ответа подряд и тема остаётся как есть (split_giveup), карточка по ней всё равно идёт."""
+    for r in db.topic_overview():
+        topic = r["topic"]
+        if r["n"] <= s.topic_max_size or db.kv_get(f"split_giveup:{topic}") == "1":
+            continue
+        posts = db.topic_queue(topic)[:limit]
+        known = [t.split(": ", 1)[1] for t in db.topic_names(300) if t.startswith(topic + ": ")]
+        prompt = (f"Широкая тема: {topic}\nСуществующие подтемы: " + (", ".join(known) if known else "пока нет")
+                  + "\n\nРазложи посты по подтемам.\n\n" + "\n".join(f"{p['id']}: {clip(p['text'])}" for p in posts))
+        try:
+            raw = await router(s, prompt, system=SPLIT_SYSTEM, schema=TOPIC_SCHEMA, timeout=s.claude_timeout)
+        except BrainError as e:
+            log.warning("подтемы %s: роутер недоступен: %s", topic, e)
+            return 0
+        valid = {p["id"] for p in posts}
+        n = 0
+        for it in (raw.get("items") or []) if isinstance(raw, dict) else []:
+            try:
+                pid, sub = int(it["post_id"]), norm_topic(str(it["topic"]).split(": ", 1)[-1])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if pid in valid and sub and sub != topic:
+                db.set_topic(pid, f"{topic}: {sub}")
+                n += 1
+        fails = 0 if n else int(db.kv_get(f"split_fail:{topic}", "0")) + 1
+        db.kv_set(f"split_fail:{topic}", str(fails))
+        if fails >= 3:
+            db.kv_set(f"split_giveup:{topic}", "1")
+        return n
+    return 0

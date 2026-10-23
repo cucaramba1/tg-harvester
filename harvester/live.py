@@ -13,7 +13,7 @@ from .db import DB
 from .enricher import Enricher
 from .matcher import FastEmbedder, Matcher, VaultVectors
 from .topic_check import run_topic_checks
-from .topics import fetch_meta, tag_topics
+from .topics import fetch_meta, split_big_topics, tag_topics
 from .writer import Writer
 
 log = logging.getLogger(__name__)
@@ -60,7 +60,10 @@ async def _topics_prep(s: Settings, db: DB, tg) -> None:
         try:
             meta = await fetch_meta(tg, db, 100)
             tagged = await tag_topics(s, db, run_router, 80) if s.video_by_topic else 0
-            stuck = s.video_by_topic and not tagged and bool(db.queue_without_topic(1))
+            if s.video_by_topic and not tagged and not db.queue_without_topic(1):
+                tagged = await split_big_topics(s, db, run_router, 80)  # всё размечено: дробим слишком широкие темы
+            stuck = s.video_by_topic and not tagged and (bool(db.queue_without_topic(1)) or any(
+                r["n"] > s.topic_max_size and db.kv_get(f"split_giveup:{r['topic']}") != "1" for r in db.topic_overview()))
             # лимиты бесплатных моделей плавающие: после неудачи ждём подольше, ночному разбору роутер тоже нужен
             await asyncio.sleep(600 if stuck else 20 if (meta or tagged) else 900)
         except Exception:

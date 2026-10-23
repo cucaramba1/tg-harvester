@@ -84,7 +84,8 @@ class App:
         for r in self.db.topic_overview():
             if left <= 0:
                 break
-            if r["n"] < self.s.topic_min_size or self.db.topic_state_of(r["topic"]) is not None:
+            too_big = r["n"] > self.s.topic_max_size and self.db.kv_get(f"split_giveup:{r['topic']}") != "1"
+            if r["n"] < self.s.topic_min_size or too_big or self.db.topic_state_of(r["topic"]) is not None:
                 continue
             tid = self.db.ensure_topic_state(r["topic"])
             samples = [p["text"] for p in self.db.topic_queue(r["topic"])[:3]]

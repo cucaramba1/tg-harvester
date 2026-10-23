@@ -82,7 +82,8 @@ from tests.test_bot import FakeBot, app_at, cbs  # noqa: E402
 
 
 def topical(tmp_path, **over):
-    return make_settings(tmp_path, video_by_topic=True, topic_cards_per_day=2, topic_min_size=2, **over)
+    base = dict(video_by_topic=True, topic_cards_per_day=2, topic_min_size=2)
+    return make_settings(tmp_path, **{**base, **over})
 
 
 def seed(db, topic, n, chat=CHAT_A, base=0, score=0.7):
@@ -260,3 +261,55 @@ def test_auto_review_writes_draft_without_asking(tmp_path, db):
     note = [m for m in bot.sent if "шея" in m[1] and "черновик" in m[1].lower()]
     assert note and note[0][2].get("reply_markup") is None
     assert db.topic_state_of("шея") == "written"
+
+
+# --- вторая ступень: дробление слишком широких тем
+
+from harvester.topics import split_big_topics  # noqa: E402
+
+
+def test_split_big_topic_into_narrow_subtopics(tmp_path, db):
+    s = topical(tmp_path, topic_max_size=3)
+    ids = seed(db, "здоровье", 5)
+    out = {"items": [{"post_id": ids[0], "topic": "Шея"}, {"post_id": ids[1], "topic": "шея"},
+                     {"post_id": ids[2], "topic": "сон"}, {"post_id": ids[3], "topic": "сон"},
+                     {"post_id": ids[4], "topic": "здоровье"}]}      # модель снова назвала родительской: не считается
+    router = FakeClaude([out])
+    n = asyncio.run(split_big_topics(s, db, router))
+    assert n == 4 and db.topic_of(ids[0]) == "здоровье: шея" and db.topic_of(ids[2]) == "здоровье: сон"
+    assert db.topic_of(ids[4]) == "здоровье"
+    assert "здоровье" in router.calls[0][0]
+
+
+def test_split_leaves_small_topics_alone_and_reuses_subtopic_names(tmp_path, db):
+    s = topical(tmp_path, topic_max_size=3)
+    seed(db, "сон", 2, base=0)
+    big = seed(db, "здоровье", 4, base=10)
+    db.set_topic(big[0], "здоровье: шея")                           # уже есть подтема, в очереди остаётся 3
+    big_rest = [p for p in big if db.topic_of(p) == "здоровье"]
+    assert len(big_rest) == 3
+    router = FakeClaude([])
+    assert asyncio.run(split_big_topics(s, db, router)) == 0 and router.calls == []   # 3 <= 3: уже не большая
+
+
+def test_split_gives_up_after_three_empty_answers(tmp_path, db):
+    s = topical(tmp_path, topic_max_size=2)
+    ids = seed(db, "здоровье", 4)
+    bad = {"items": [{"post_id": i, "topic": "здоровье"} for i in ids]}
+    router = FakeClaude([bad, bad, bad, bad])
+    for _ in range(4):
+        asyncio.run(split_big_topics(s, db, router))
+    assert len(router.calls) == 3                                    # на четвёртый раз роутер уже не зовём
+    assert db.kv_get("split_giveup:здоровье") == "1"
+
+
+def test_big_topic_gets_no_card_until_split_but_giveup_topics_do(tmp_path, db):
+    s = topical(tmp_path, topic_max_size=3, topic_cards_per_day=5)
+    seed(db, "здоровье", 6, base=0)
+    seed(db, "сон", 2, base=20)
+    seed(db, "ai", 5, base=40)
+    db.kv_set("split_giveup:ai", "1")
+    bot = FakeBot()
+    asyncio.run(app_at(s, db, hour=10).tick(bot))
+    titles = sorted(m[1].splitlines()[0] for m in bot.sent if m[1].startswith("🧩"))
+    assert titles == ["🧩 ai", "🧩 сон"]
