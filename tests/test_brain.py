@@ -180,3 +180,78 @@ def test_no_router_tail_when_disabled(s, db):
     claude, router = FakeClaude([answer()]), FakeClaude([])
     asyncio.run(run_night(s2, db, claude=claude, router=router))
     assert len(claude.calls) == 1 and len(router.calls) == 0
+
+
+def test_router_tail_failure_stops_tail_and_never_penalizes_posts(s, db):
+    import dataclasses
+    setup_vault(s)
+    ids = [cand(db, i, score=0.9 - i / 100) for i in range(1, 7)]
+    s2 = dataclasses.replace(s, max_calls_per_night=1, router_fallback=True, router_tail_batches=3)
+    claude = FakeClaude([lambda p: answer(item(ids[0]), item(ids[1]))])
+    router = FakeClaude([BrainError("роутер недоступен: HTTP Error 502"), answer()])
+    rep = asyncio.run(run_night(s2, db, claude=claude, router=router))
+    assert len(router.calls) == 1 and rep["tail_error"] and rep["aborted"] is None
+    for pid in ids[2:]:
+        p = db.get_post(pid)
+        assert (p["status"], p["attempts"]) == ("candidate", 0)
+
+
+def test_router_tail_garbage_answer_does_not_burn_attempts(s, db):
+    import dataclasses
+    setup_vault(s)
+    ids = [cand(db, i, score=0.9 - i / 100) for i in range(1, 5)]
+    s2 = dataclasses.replace(s, max_calls_per_night=1, router_fallback=True, router_tail_batches=1)
+    claude = FakeClaude([lambda p: answer(item(ids[0]), item(ids[1]))])
+    router = FakeClaude([answer()])  # роутер ответил пустотой
+    asyncio.run(run_night(s2, db, claude=claude, router=router))
+    assert db.get_post(ids[2])["attempts"] == 0 and db.get_post(ids[3])["attempts"] == 0
+
+
+class _Resp:
+    def __init__(self, content):
+        self.content = content
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self, *a):
+        return json.dumps({"choices": [{"message": {"content": self.content}}]}).encode()
+
+
+def test_run_router_tries_next_model_when_first_is_rate_limited(s, monkeypatch):
+    import urllib.error
+    import urllib.request
+
+    from harvester import brain
+    monkeypatch.setenv("FREELLM_KEY", "k")
+    monkeypatch.setattr(brain, "ROUTER_MODELS", ("first", "auto"))
+    asked = []
+
+    def fake_open(rq, timeout=0):
+        model = json.loads(rq.data)["model"]
+        asked.append(model)
+        if model == "first":
+            raise urllib.error.HTTPError(rq.full_url, 502, "Bad Gateway", {}, None)
+        return _Resp('{"items": []}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_open)
+    out = asyncio.run(brain.run_router(s, "p", system="s", schema={"items": []}, timeout=5))
+    assert out == {"items": []} and asked == ["first", "auto"]
+
+
+def test_run_router_raises_brain_error_when_all_models_fail(s, monkeypatch):
+    import urllib.error
+    import urllib.request
+
+    import pytest
+
+    from harvester import brain
+    monkeypatch.setenv("FREELLM_KEY", "k")
+    monkeypatch.setattr(brain, "ROUTER_MODELS", ("a", "b"))
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda rq, timeout=0: (_ for _ in ()).throw(urllib.error.HTTPError(rq.full_url, 502, "x", {}, None)))
+    with pytest.raises(BrainError, match="роутер недоступен"):
+        asyncio.run(brain.run_router(s, "p", system="s", timeout=5))

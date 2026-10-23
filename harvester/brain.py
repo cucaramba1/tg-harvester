@@ -94,7 +94,8 @@ async def run_claude(s: Settings, prompt: str, *, system: str, schema: dict | No
 
 ROUTER_URL = os.environ.get("FREELLM_URL", "http://127.0.0.1:3001")
 ROUTER_DB = Path.home() / "Claude Code/freellmapi/server/data/freeapi.db"
-ROUTER_MODEL = os.environ.get("FREELLM_MODEL", "gemini-3.8-flash")  # на 99 постах 82/99 против 88 у sonnet
+# на 99 постах gemini-3.8-flash совпал 82/99 против 88 у sonnet; у одной модели один маршрут, при лимите идём на auto
+ROUTER_MODELS = tuple(m.strip() for m in os.environ.get("FREELLM_MODEL", "gemini-3.8-flash,auto").split(",") if m.strip())
 
 
 def _router_key() -> str:
@@ -118,18 +119,28 @@ async def run_router(s: Settings, prompt: str, *, system: str, schema: dict | No
 
     hint = ("\n\nОтветь ТОЛЬКО JSON без markdown-ограждений, строго по схеме:\n"
             + json.dumps(schema, ensure_ascii=False)) if schema else ""
-    body = json.dumps({"model": ROUTER_MODEL, "max_tokens": 8000, "temperature": 0,
-                       "messages": [{"role": "system", "content": system},
-                                    {"role": "user", "content": prompt + hint}]}).encode()
-    rq = urllib.request.Request(f"{ROUTER_URL}/v1/chat/completions", body,
-                                {"Authorization": f"Bearer {_router_key()}", "Content-Type": "application/json"})
+    key = _router_key()
 
-    def call() -> str:
+    def call(model: str) -> str:
+        body = json.dumps({"model": model, "max_tokens": 8000, "temperature": 0,
+                           "messages": [{"role": "system", "content": system},
+                                        {"role": "user", "content": prompt + hint}]}).encode()
+        rq = urllib.request.Request(f"{ROUTER_URL}/v1/chat/completions", body,
+                                    {"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         with urllib.request.urlopen(rq, timeout=timeout) as r:
             return json.load(r)["choices"][0]["message"]["content"] or ""
 
+    def first_working() -> str:
+        err: Exception | None = None
+        for model in ROUTER_MODELS:
+            try:
+                return call(model)
+            except Exception as e:  # лимит или недоступный маршрут: пробуем следующую модель
+                err = e
+        raise err or RuntimeError("модели роутера не заданы")
+
     try:
-        txt = await asyncio.to_thread(call)
+        txt = await asyncio.to_thread(first_working)
     except Exception as e:
         raise BrainError(f"роутер недоступен: {str(e)[:200]}")
     if schema is None:
@@ -266,12 +277,13 @@ async def run_night(s: Settings, db: DB, claude=run_claude, router=run_router) -
         kw = dict(system=SYSTEM, schema=SCHEMA, tools=("Read",) if imgs else (),
                   add_dirs=tuple(sorted({str(Path(x).parent) for _, x in imgs})), timeout=s.claude_timeout)
         raw = None
+        in_tail = False
         for _ in range(2):
             if rep["calls"] >= cap:
                 break
             rep["calls"] += 1
             if rep["calls"] > limit:
-                on_router = True
+                on_router = in_tail = True
                 rep["tail"] = rep.get("tail", 0) + 1
             try:
                 if on_router:  # без целей Некита (личное не уходит во внешние бесплатные тиры) и без картинок
@@ -281,6 +293,9 @@ async def run_night(s: Settings, db: DB, claude=run_claude, router=run_router) -
                     raw = await claude(s, prompt, **kw)
                 break
             except BrainError as e:
+                if in_tail:  # хвост это бонус: сбой роутера не должен ни штрафовать посты, ни тянуть остальные батчи
+                    rep["tail_error"] = str(e)[:200]
+                    break
                 if is_limit(e) and s.router_fallback and not on_router:
                     on_router = True
                     rep["fallback"] = str(e)[:200]
@@ -288,12 +303,14 @@ async def run_night(s: Settings, db: DB, claude=run_claude, router=run_router) -
                 if is_limit(e):
                     rep["aborted"] = str(e)[:200]
                     break
-        if rep["aborted"]:
+        if rep["aborted"] or rep.get("tail_error"):
             break
         verdicts = validate(raw.get("items") or [], batch, sections, s.vaults) if isinstance(raw, dict) else {}
         for p in batch:
             v = verdicts.get(p["id"])
             if v is None:
+                if in_tail:
+                    continue  # бесплатная модель могла промолчать: пост остаётся в очереди для Claude без штрафа
                 if db.bump_attempts(p["id"]) >= 3:
                     db.update_post(p["id"], status="error", reason="claude: нет ответа по посту")
                     drop_keep(s, p["id"])
