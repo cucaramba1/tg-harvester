@@ -38,6 +38,8 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         sub.add_parser(name)
     av = sub.add_parser("autovideo")
     av.add_argument("action", choices=["backfill", "report"])
+    tp = sub.add_parser("topics")
+    tp.add_argument("action", choices=["report"])
     sec = sub.add_parser("section")
     sec.add_argument("name")
     a = p.parse_args(argv)
@@ -56,6 +58,13 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
             print(f"Добавлено меток из video_state: {db.backfill_video_labels()}")
         else:
             print(report_text(s, db))
+    elif a.cmd == "topics":
+        from .db import DB
+        db = DB(s.db_path)
+        ov = db.topic_overview()
+        print(f"Тем в очереди: {len(ov)}, вопросов с темой: {sum(r['n'] for r in ov)}, без темы: {len(db.queue_without_topic(10**6))}")
+        for r in ov[:40]:
+            print(f"  {r['topic']}: {r['n']} видео, разных файлов {r['files']}")
     elif a.cmd == "login":
         asyncio.run(_login(s))
     elif a.cmd == "live":

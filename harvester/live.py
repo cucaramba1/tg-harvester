@@ -12,6 +12,7 @@ from .config import Settings
 from .db import DB
 from .enricher import Enricher
 from .matcher import FastEmbedder, Matcher, VaultVectors
+from .topics import fetch_meta, tag_topics
 from .writer import Writer
 
 log = logging.getLogger(__name__)
@@ -51,6 +52,19 @@ async def _process(db: DB, enr: Enricher, mat: Matcher, vectors: VaultVectors) -
             await asyncio.sleep(60)
 
 
+async def _topics_prep(s: Settings, db: DB, tg) -> None:
+    """Метаданные файла и темы для очереди видео-вопросов. Всё через единственную Telethon-сессию live-процесса."""
+    from .brain import run_router
+    while True:
+        try:
+            meta = await fetch_meta(tg, db, 100)
+            tagged = await tag_topics(s, db, run_router, 80) if s.video_by_topic else 0
+            await asyncio.sleep(20 if (meta or tagged) else 900)  # лимиты бесплатных моделей плавающие, не давим
+        except Exception:
+            log.exception("topics_prep")
+            await asyncio.sleep(120)
+
+
 async def _tick(app: App, bot) -> None:
     while True:
         await app.tick(bot)
@@ -85,7 +99,7 @@ async def run_live(s: Settings) -> None:
     dp = build_dispatcher(app)
     log.info("TG Harvester запущен")
     await asyncio.gather(_collect(col), _process(db, Enricher(s, db, tg), Matcher(s, db, vectors), vectors),
-                         _tick(app, bot), dp.start_polling(bot, handle_signals=False))
+                         _topics_prep(s, db, tg), _tick(app, bot), dp.start_polling(bot, handle_signals=False))
 
 
 async def run_bot(s: Settings) -> None:

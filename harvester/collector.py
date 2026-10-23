@@ -51,6 +51,14 @@ class TgClient:
         ms = await self.c.get_messages(chat_id, limit=1, offset_date=when)
         return ms[0].id if ms else None
 
+    async def messages_meta(self, chat_id: int, ids: list[int]) -> dict[int, tuple]:
+        """document id, размер и длительность видео по id сообщений, без скачивания. Удалённых в ответе нет."""
+        out = {}
+        for m in await self.c.get_messages(chat_id, ids=ids):
+            if m is not None and m.media and m.document is not None and m.file is not None:
+                out[m.id] = (m.document.id, m.file.size, m.file.duration)
+        return out
+
     async def download(self, chat_id: int, msg_id: int, dest: Path) -> Path | None:
         m = await self.c.get_messages(chat_id, ids=msg_id)
         if m is None or not m.media:

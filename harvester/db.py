@@ -75,6 +75,22 @@ CREATE TABLE IF NOT EXISTS labels(
   source TEXT NOT NULL DEFAULT 'import',
   ts TEXT
 );
+CREATE TABLE IF NOT EXISTS post_meta(post_id INTEGER PRIMARY KEY, doc_id INTEGER, size INTEGER, dur REAL);
+CREATE TABLE IF NOT EXISTS topics(post_id INTEGER PRIMARY KEY, topic TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS topics_topic ON topics(topic);
+CREATE TABLE IF NOT EXISTS topic_state(
+  id INTEGER PRIMARY KEY,
+  topic TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL DEFAULT 'new',
+  msg_id INTEGER,
+  report TEXT
+);
+CREATE TABLE IF NOT EXISTS topic_checks(
+  post_id INTEGER PRIMARY KEY,
+  silent INTEGER NOT NULL DEFAULT 0,
+  speech TEXT NOT NULL DEFAULT '',
+  ocr TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS audits(
   id INTEGER PRIMARY KEY,
   block_id INTEGER NOT NULL,
@@ -258,6 +274,44 @@ class DB:
     def labeled(self) -> list:
         return self.c.execute("SELECT p.score, p.section_score, l.useful FROM labels l "
                               "JOIN posts p ON p.id = l.post_id").fetchall()
+
+    # --- метаданные файла, темы
+    def save_meta(self, pid: int, doc_id: int | None, size: int | None, dur: float | None) -> None:
+        self.c.execute("INSERT OR REPLACE INTO post_meta(post_id, doc_id, size, dur) VALUES(?, ?, ?, ?)",
+                       (pid, doc_id, size, dur))
+
+    def get_meta(self, pid: int):
+        return self.c.execute("SELECT * FROM post_meta WHERE post_id=?", (pid,)).fetchone()
+
+    def queue_without_meta(self, limit: int) -> list:
+        return self.c.execute(
+            "SELECT p.* FROM posts p LEFT JOIN post_meta m ON m.post_id=p.id "
+            "WHERE p.status='video_ask' AND p.video_state='ask' AND m.post_id IS NULL ORDER BY p.id LIMIT ?",
+            (limit,)).fetchall()
+
+    def set_topic(self, pid: int, topic: str) -> None:
+        self.c.execute("INSERT OR REPLACE INTO topics(post_id, topic) VALUES(?, ?)", (pid, topic))
+
+    def topic_of(self, pid: int) -> str | None:
+        r = self.c.execute("SELECT topic FROM topics WHERE post_id=?", (pid,)).fetchone()
+        return r[0] if r else None
+
+    def queue_without_topic(self, limit: int) -> list:
+        return self.c.execute(
+            "SELECT p.* FROM posts p LEFT JOIN topics t ON t.post_id=p.id "
+            "WHERE p.status='video_ask' AND p.video_state='ask' AND t.post_id IS NULL ORDER BY p.id LIMIT ?",
+            (limit,)).fetchall()
+
+    def topic_names(self, limit: int = 40) -> list[str]:
+        return [r[0] for r in self.c.execute(
+            "SELECT topic FROM topics GROUP BY topic ORDER BY COUNT(*) DESC, topic LIMIT ?", (limit,))]
+
+    def topic_overview(self) -> list:
+        """Темы очереди видео-вопросов: сколько постов и сколько разных файлов (повторы по document id считаются один раз)."""
+        return self.c.execute(
+            "SELECT t.topic AS topic, COUNT(*) AS n, COUNT(DISTINCT COALESCE(m.doc_id, -p.id)) AS files "
+            "FROM posts p JOIN topics t ON t.post_id=p.id LEFT JOIN post_meta m ON m.post_id=p.id "
+            "WHERE p.status='video_ask' AND p.video_state='ask' GROUP BY t.topic ORDER BY n DESC, t.topic").fetchall()
 
     # --- audits
     def add_audit(self, block_id: int, verdict: str, reason: str) -> int:
