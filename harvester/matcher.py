@@ -65,8 +65,7 @@ class VaultVectors:
 
     def _files(self) -> dict[str, float]:
         out = {}
-        for p in self.s.vault.rglob("*.md"):
-            rel = p.relative_to(self.s.vault)
+        for p, rel in ((p, p.relative_to(r)) for r in self.s.vaults for p in r.rglob("*.md")):
             if any(part.startswith(".") for part in rel.parts):
                 continue
             if any(part in self.s.skip_sections for part in rel.parts[:-1]) or p.stem.endswith("карта заметок"):
@@ -98,7 +97,7 @@ class VaultVectors:
         cache = self._load()
         todo = [r for r, mt in files.items() if r not in cache or cache[r][0] != mt]
         if todo:
-            vecs = self.embedder.embed([note_text(self.s.vault / r) for r in todo])
+            vecs = self.embedder.embed([note_text(self.s.path(r)) for r in todo])
             for r, v in zip(todo, vecs):
                 cache[r] = (files[r], np.asarray(v, dtype=np.float32))
         cache = {r: cache[r] for r in files}
@@ -110,7 +109,7 @@ class VaultVectors:
             if sec := section_of(r):
                 groups.setdefault(sec, []).append(i)
         self.centroids = {sec: _norm(self.vecs[idx].mean(axis=0)) for sec, idx in groups.items()}
-        self.sections = list_sections(self.s.vault)
+        self.sections = list_sections(self.s.vaults)
         return len(todo)
 
     def match(self, vec: np.ndarray) -> Match:

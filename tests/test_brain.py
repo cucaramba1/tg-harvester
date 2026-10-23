@@ -74,6 +74,22 @@ def test_usage_limit_aborts_night_without_penalty(s, db):
     assert any("Ночь прервана" in t for t in db.pop_alerts())
 
 
+def test_usage_limit_switches_to_router_without_goals(s, db):
+    import dataclasses
+    setup_vault(s)
+    (s.vault / s.goals_note).parent.mkdir(parents=True, exist_ok=True)
+    (s.vault / s.goals_note).write_text("СЕКРЕТНАЯ ЦЕЛЬ", "utf-8")
+    a = cand(db, 1)
+    claude = FakeClaude([BrainError("claude: You've hit your usage limit")])
+    router = FakeClaude([lambda p: answer(item(a))])
+    s2 = dataclasses.replace(s, router_fallback=True)
+    rep = asyncio.run(run_night(s2, db, claude=claude, router=router))
+    assert rep["aborted"] is None and "fallback" in rep
+    assert db.get_post(a)["status"] == "drafted"
+    assert len(claude.calls) == 1 and len(router.calls) == 1
+    assert "СЕКРЕТНАЯ ЦЕЛЬ" not in router.calls[0][0]
+
+
 def test_missing_claude_binary_aborts_night(s, db):
     setup_vault(s)
     a = cand(db, 1)

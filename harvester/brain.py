@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from .config import Settings
+from .config import Settings, as_roots, locate
 from .db import DB
 from .files import drop_keep, list_sections
 
@@ -57,6 +57,7 @@ async def run_claude(s: Settings, prompt: str, *, system: str, schema: dict | No
             "--system-prompt", system, "--tools", ",".join(tools)]
     if tools:
         args += ["--allowedTools", ",".join(tools)]  # без этого в -p тул упрётся в запрос разрешения
+    args += ["--model", os.environ.get("CLAUDE_BATCH_MODEL", "sonnet")]  # ночные батчи не на Opus
     for d in add_dirs:
         args += ["--add-dir", d]
     if schema is not None:
@@ -91,6 +92,55 @@ async def run_claude(s: Settings, prompt: str, *, system: str, schema: dict | No
     return str(data.get("result") or "")
 
 
+ROUTER_URL = os.environ.get("FREELLM_URL", "http://127.0.0.1:3001")
+ROUTER_DB = Path.home() / "Claude Code/freellmapi/server/data/freeapi.db"
+ROUTER_MODEL = os.environ.get("FREELLM_MODEL", "gemini-3.8-flash")  # на 99 постах 82/99 против 88 у sonnet
+
+
+def _router_key() -> str:
+    if os.environ.get("FREELLM_KEY"):
+        return os.environ["FREELLM_KEY"]
+    import sqlite3
+    try:
+        with sqlite3.connect(f"file:{ROUTER_DB}?mode=ro", uri=True) as c:
+            row = c.execute("select value from settings where key='unified_api_key'").fetchone()
+    except sqlite3.Error as e:
+        raise BrainError(f"ключ роутера недоступен: {e}")
+    if not row:
+        raise BrainError("ключ роутера не найден")
+    return row[0]
+
+
+async def run_router(s: Settings, prompt: str, *, system: str, schema: dict | None = None,
+                     tools: tuple[str, ...] = (), add_dirs: tuple[str, ...] = (), timeout: int) -> dict | str:
+    """Запас на случай лимита Claude: локальный FreeLLMAPI. Картинки (tools) не читает."""
+    import urllib.request
+
+    hint = ("\n\nОтветь ТОЛЬКО JSON без markdown-ограждений, строго по схеме:\n"
+            + json.dumps(schema, ensure_ascii=False)) if schema else ""
+    body = json.dumps({"model": ROUTER_MODEL, "max_tokens": 8000, "temperature": 0,
+                       "messages": [{"role": "system", "content": system},
+                                    {"role": "user", "content": prompt + hint}]}).encode()
+    rq = urllib.request.Request(f"{ROUTER_URL}/v1/chat/completions", body,
+                                {"Authorization": f"Bearer {_router_key()}", "Content-Type": "application/json"})
+
+    def call() -> str:
+        with urllib.request.urlopen(rq, timeout=timeout) as r:
+            return json.load(r)["choices"][0]["message"]["content"] or ""
+
+    try:
+        txt = await asyncio.to_thread(call)
+    except Exception as e:
+        raise BrainError(f"роутер недоступен: {str(e)[:200]}")
+    if schema is None:
+        return txt
+    m = re.search(r"\{.*\}", txt, re.S)
+    try:
+        return json.loads(m.group(0)) if m else {}
+    except ValueError:
+        raise BrainError("роутер вернул не JSON")
+
+
 @dataclass
 class Verdict:
     post_id: int
@@ -121,8 +171,8 @@ def is_limit(e: Exception) -> bool:
 def _safe_note(vault: Path, rel: str | None) -> bool:
     if not rel:
         return False
-    p = (vault / rel).resolve()
-    return p.is_relative_to(vault.resolve()) and p.is_file()
+    p = locate(vault, rel).resolve()
+    return any(p.is_relative_to(r.resolve()) for r in as_roots(vault)) and p.is_file()
 
 
 def _top_sections(post) -> list[str]:
@@ -189,16 +239,17 @@ def build_prompt(posts: list, sections: list[str], goals: str, channel_name, ima
     return "\n".join(parts)
 
 
-async def run_night(s: Settings, db: DB, claude=run_claude) -> dict:
+async def run_night(s: Settings, db: DB, claude=run_claude, router=run_router) -> dict:
     retro = db.retro_active()
     limit = int(s.max_calls_per_night * (s.retro_multiplier if retro else 1))
     queue = db.night_queue(s.explore_quota)
-    sections = list_sections(s.vault)
+    sections = list_sections(s.vaults)
     goals_p = s.vault / s.goals_note
     goals = goals_p.read_text("utf-8")[:3000] if goals_p.exists() else ""
     rep = {"date": date.today().isoformat(), "limit": limit, "calls": 0, "queue": len(queue), "drafted": 0,
            "skipped": 0, "errors": 0, "aborted": None, "retro": retro}
     images_left = s.max_images_per_night
+    on_router = False
     for batch in chunks(queue, s.batch_size):
         if rep["calls"] >= limit:
             break
@@ -218,15 +269,23 @@ async def run_night(s: Settings, db: DB, claude=run_claude) -> dict:
                 break
             rep["calls"] += 1
             try:
-                raw = await claude(s, prompt, **kw)
+                if on_router:  # без целей Некита (личное не уходит во внешние бесплатные тиры) и без картинок
+                    raw = await router(s, build_prompt(batch, sections, "", s.channel_name, []),
+                                       system=SYSTEM, schema=SCHEMA, timeout=s.claude_timeout)
+                else:
+                    raw = await claude(s, prompt, **kw)
                 break
             except BrainError as e:
+                if is_limit(e) and s.router_fallback and not on_router:
+                    on_router = True
+                    rep["fallback"] = str(e)[:200]
+                    continue
                 if is_limit(e):
                     rep["aborted"] = str(e)[:200]
                     break
         if rep["aborted"]:
             break
-        verdicts = validate(raw.get("items") or [], batch, sections, s.vault) if isinstance(raw, dict) else {}
+        verdicts = validate(raw.get("items") or [], batch, sections, s.vaults) if isinstance(raw, dict) else {}
         for p in batch:
             v = verdicts.get(p["id"])
             if v is None:
@@ -240,7 +299,7 @@ async def run_night(s: Settings, db: DB, claude=run_claude) -> dict:
                 rep["skipped"] += 1
             else:
                 db.add_draft(p["id"], v.mode, v.target, v.title, v.content, v.keep_image,
-                             alternatives(p, sections, s.vault))
+                             alternatives(p, sections, s.vaults))
                 db.update_post(p["id"], status="drafted")
                 rep["drafted"] += 1
     if rep["aborted"]:

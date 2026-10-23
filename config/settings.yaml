@@ -22,6 +22,7 @@ max_calls_per_night: 5     # калибруется на пилоте
 retro_multiplier: 2.5      # пока какой-то канал не в фазе done
 max_images_per_night: 10
 claude_timeout: 300
+router_fallback: true      # лимит Claude кончился: остаток ночи на локальном FreeLLMAPI (gemini-3.8-flash), без целей и картинок
 # бот и запись
 cards_per_day: 30
 video_asks_per_day: 50   # вопросов «разобрать видео» в день, лучшие по совпадению первыми

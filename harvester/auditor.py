@@ -24,7 +24,7 @@ AUDIT_SCHEMA = {
 
 
 def block_view(s: Settings, b) -> str | None:
-    path = s.vault / b["path"]
+    path = s.path(b["path"])
     if not path.exists():
         return None
     note = path.read_text("utf-8", errors="ignore")

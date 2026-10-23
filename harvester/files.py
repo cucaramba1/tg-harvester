@@ -5,14 +5,14 @@ import shutil
 from datetime import date, timedelta
 from pathlib import Path
 
-from .config import Settings
+from .config import Settings, as_roots
 
 
 def snapshot(s: Settings, path: Path) -> Path | None:
     """Копия файла до первой правки за день: data/snapshots/<дата>/<путь в vault>."""
     if not path.exists():
         return None
-    dest = s.snapshots_dir / date.today().isoformat() / path.relative_to(s.vault)
+    dest = s.snapshots_dir / date.today().isoformat() / path.relative_to(s.root_of(path))
     if not dest.exists():
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, dest)
@@ -40,10 +40,10 @@ def drop_keep(s: Settings, post_id: int) -> None:
 
 def list_sections(vault: Path) -> list[str]:
     """Разделы L2: папка в корне vault, рядом с которой лежит одноимённый холст."""
-    return sorted(d.name for d in vault.iterdir()
-                  if d.is_dir() and not d.name.startswith(".") and (vault / f"{d.name}.canvas").exists())
+    return sorted({d.name for r in as_roots(vault) for d in r.iterdir()
+                   if d.is_dir() and not d.name.startswith(".") and (r / f"{d.name}.canvas").exists()})
 
 
 def find_moc(vault: Path, section: str) -> Path | None:
     name = f"{section} — карта заметок.md"
-    return next((p for p in (vault / section / name, vault / name) if p.exists()), None)
+    return next((p for r in as_roots(vault) for p in (r / section / name, r / name) if p.exists()), None)

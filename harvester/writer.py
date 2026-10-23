@@ -7,7 +7,7 @@ import re
 import shutil
 from pathlib import Path
 
-from .config import Settings
+from .config import Settings, as_roots, locate
 from .db import DB
 from .files import drop_keep, find_moc, snapshot
 from .vault.canvas import Canvas, add_to_group, ensure_side_group
@@ -55,9 +55,11 @@ def plan_append(text: str, line: str) -> tuple[int, str]:
 
 def inside(vault: Path, rel: str) -> Path:
     """Путь внутри vault или WriteError: Claude не должен уметь писать куда-то ещё."""
-    if not rel or not (vault / rel).resolve().is_relative_to(vault.resolve()) or (vault / rel).resolve() == vault.resolve():
+    roots = as_roots(vault)
+    p = locate(roots, rel).resolve()
+    if not rel or not any(p.is_relative_to(r.resolve()) and p != r.resolve() for r in roots):
         raise WriteError(f"путь вне vault: {rel}")
-    return vault / rel
+    return locate(roots, rel)
 
 
 class Writer:
@@ -71,14 +73,14 @@ class Writer:
         post = self.db.get_post(d["post_id"])
         link, day = post_link(post["chat_id"], post["msg_id"]), post["date"][:10]
         if d["mode"] == "append":
-            path = inside(self.s.vault, d["target"])
+            path = inside(self.s.vaults, d["target"])
             if not path.is_file():
                 raise WriteError(f"заметки больше нет: {d['target']}")
         else:
-            path = inside(self.s.vault, d["target"])
+            path = inside(self.s.vaults, d["target"])
             if not path.is_dir():
                 raise WriteError(f"раздела нет: {d['target']}")
-        image = self._copy_image(post) if d["keep_image"] else None
+        image = self._copy_image(post, self.s.root_of(path)) if d["keep_image"] else None
         content = d["content"].strip() + (f"\n![[{image}]]" if image else "")
         try:
             if d["mode"] == "append":
@@ -87,18 +89,18 @@ class Writer:
                 bid = self._new(d, post, path, content, link, day, image)
         except Exception:
             if image:
-                (self.s.vault / image).unlink(missing_ok=True)
+                (self.s.root_of(path) / image).unlink(missing_ok=True)
             raise
         self.db.update_draft(did, status="written")
         self.db.update_post(post["id"], status="written")
         drop_keep(self.s, post["id"])
         return bid
 
-    def _copy_image(self, post) -> str | None:
+    def _copy_image(self, post, root: Path) -> str | None:
         for p in map(Path, json.loads(post["images"])):
             if p.exists():
                 rel = f"{self.s.attachments_dir}/tg-{str(post['chat_id']).removeprefix('-100')}-{post['msg_id']}{p.suffix}"
-                dest = self.s.vault / rel
+                dest = root / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(p, dest)
                 return rel
@@ -119,8 +121,9 @@ class Writer:
         section = d["target"]
         title = (d["title"] or "Из Telegram").strip()
         path = unique_note_path(folder, title)
-        rel = path.relative_to(self.s.vault).as_posix()
-        related = [wikilink(r) for r, _ in json.loads(post["top3"]) if (self.s.vault / r).is_file()][:3]
+        root = self.s.root_of(path)
+        rel = path.relative_to(root).as_posix()
+        related = [wikilink(r) for r, _ in json.loads(post["top3"]) if self.s.path(r).is_file()][:3]
         channel = self.s.channel_name(post["chat_id"])
         body = (f"---\nsource: {json.dumps(link)}\nchannel: {json.dumps(channel, ensure_ascii=False)}\n"
                 f"date: {day}\ntags: [telegram]\n---\n# {title}\n\n{content}\n\nИсточник: [пост]({link}), {channel}\n")
@@ -128,11 +131,11 @@ class Writer:
             body += "\n## Связанные заметки\n" + "".join(f"- {x}\n" for x in related)
         atomic_write(path, body)
         extra: dict = {"item": wikilink(rel), **({"image": image} if image else {})}
-        if moc := find_moc(self.s.vault, section):
+        if moc := find_moc(root, section):
             snapshot(self.s, moc)
             moc_add(moc, MOC_SECTION, wikilink(rel))
-            extra["moc"] = moc.relative_to(self.s.vault).as_posix()
-        cv_path = self.s.vault / f"{section}.canvas"
+            extra["moc"] = moc.relative_to(root).as_posix()
+        cv_path = root / f"{section}.canvas"
         if cv_path.exists():
             snapshot(self.s, cv_path)
             cv = Canvas.load(cv_path)
@@ -147,11 +150,12 @@ class Writer:
         if b is None or b["rolled_back"]:
             return "already"
         extra = json.loads(b["extra"])
-        path = self.s.vault / b["path"]
+        path = self.s.path(b["path"])
+        root = self.s.root_of(path)
         res = self._rollback_append(b, path, extra) if b["kind"] == "append" else self._rollback_new(b, path, extra)
         if res == "ok":
             if img := extra.get("image"):
-                (self.s.vault / img).unlink(missing_ok=True)
+                (root / img).unlink(missing_ok=True)
             self.db.mark_rolled_back(bid)
             self.db.update_draft(b["draft_id"], status="rolled_back")
         return res
@@ -176,15 +180,16 @@ class Writer:
         return "ok"
 
     def _rollback_new(self, b, path: Path, extra: dict) -> str:
+        root = self.s.root_of(path)
         if path.exists():
             if sha(path.read_bytes()) != b["sha"]:
                 return "changed"
             snapshot(self.s, path)
             path.unlink()
         if moc_rel := extra.get("moc"):
-            moc_remove(self.s.vault / moc_rel, extra["item"])
+            moc_remove(root / moc_rel, extra["item"])
         if cv_name := extra.get("canvas"):
-            cv_path = self.s.vault / cv_name
+            cv_path = root / cv_name
             if cv_path.exists():
                 cv = Canvas.load(cv_path)
                 cv.remove_node(extra["node"])

@@ -20,6 +20,17 @@ class Channel:
     backfill: bool = True
 
 
+def as_roots(vault) -> list[Path]:
+    return [vault] if isinstance(vault, Path) else list(vault)
+
+
+def locate(vault, rel: str) -> Path:
+    """Путь заметки по относительному: берётся vault, в корне которого есть раздел (папка или одноимённый холст)."""
+    roots = as_roots(vault)
+    first = Path(rel).parts[0] if rel else ""
+    return next((r / rel for r in roots if first and (r / first).exists()), roots[0] / rel)
+
+
 @dataclass
 class Settings:
     root: Path
@@ -56,8 +67,10 @@ class Settings:
     cards_hour: int
     snapshot_days: int
     attachments_dir: str
+    extra_vaults: tuple = ()
     video_asks_per_day: int = 5
     max_keep_gb: float = 1.0
+    router_fallback: bool = False
 
     @property
     def data_dir(self) -> Path:
@@ -99,6 +112,17 @@ class Settings:
     def calibration_path(self) -> Path:
         return self.data_dir / "calibration.json"
 
+    @property
+    def vaults(self) -> list[Path]:
+        return [self.vault, *self.extra_vaults]
+
+    def path(self, rel: str) -> Path:
+        return locate(self.vaults, rel)
+
+    def root_of(self, path: Path) -> Path:
+        """Корень vault, внутри которого лежит путь (по умолчанию основной)."""
+        return next((r for r in self.vaults if path.is_relative_to(r)), self.vault)
+
     def channel_name(self, chat_id: int) -> str:
         return next((c.name for c in self.channels if c.id == chat_id), str(chat_id))
 
@@ -117,6 +141,7 @@ def load_settings(root: Path | None = None) -> Settings:
     return Settings(
         root=root,
         vault=Path(env("VAULT_DIR", str(home / "Documents/Obsidian storage"))),
+        extra_vaults=tuple(Path(x).expanduser() for x in env("EXTRA_VAULT_DIRS", str(home / "Documents/Obsidian Досуг")).split(":") if x),
         bot_token=env("BOT_TOKEN"),
         owner_id=int(env("OWNER_ID") or 0),
         api_id=int(env("TG_API_ID") or 0),
@@ -151,4 +176,5 @@ def load_settings(root: Path | None = None) -> Settings:
         attachments_dir=str(cfg["attachments_dir"]),
         video_asks_per_day=int(cfg.get("video_asks_per_day", 5)),
         max_keep_gb=float(cfg.get("max_keep_gb", 1.0)),
+        router_fallback=bool(cfg.get("router_fallback", False)),
     )
