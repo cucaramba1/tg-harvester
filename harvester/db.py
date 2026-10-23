@@ -313,6 +313,44 @@ class DB:
             "FROM posts p JOIN topics t ON t.post_id=p.id LEFT JOIN post_meta m ON m.post_id=p.id "
             "WHERE p.status='video_ask' AND p.video_state='ask' GROUP BY t.topic ORDER BY n DESC, t.topic").fetchall()
 
+    # --- состояние тем
+    def topic_state_id(self, topic: str) -> int | None:
+        r = self.c.execute("SELECT id FROM topic_state WHERE topic=?", (topic,)).fetchone()
+        return r[0] if r else None
+
+    def ensure_topic_state(self, topic: str) -> int:
+        self.c.execute("INSERT OR IGNORE INTO topic_state(topic) VALUES(?)", (topic,))
+        return self.topic_state_id(topic)
+
+    def topic_state_of(self, topic: str) -> str | None:
+        r = self.c.execute("SELECT state FROM topic_state WHERE topic=?", (topic,)).fetchone()
+        return r[0] if r else None
+
+    def topic_by_id(self, tid: int):
+        return self.c.execute("SELECT * FROM topic_state WHERE id=?", (tid,)).fetchone()
+
+    def set_topic_state(self, tid: int, state: str, **fields) -> None:
+        self._update("topic_state", "id", tid, {"state": state, **fields})
+
+    def topic_queue(self, topic: str) -> list:
+        return self.c.execute(
+            "SELECT p.* FROM posts p JOIN topics t ON t.post_id=p.id WHERE t.topic=? AND p.status='video_ask' "
+            "AND p.video_state='ask' ORDER BY p.score DESC, p.id", (topic,)).fetchall()
+
+    def unmanaged_video_asks(self, limit: int, min_size: int) -> list:
+        """Вопросы по одному: только посты с темой, по которой в очереди меньше min_size видео и карточки темы не было."""
+        return self.c.execute(
+            "SELECT p.* FROM posts p JOIN topics t ON t.post_id=p.id "
+            "WHERE p.status='video_ask' AND p.video_state='ask' "
+            "AND NOT EXISTS (SELECT 1 FROM topic_state ts WHERE ts.topic=t.topic) "
+            "AND (SELECT COUNT(*) FROM posts p2 JOIN topics t2 ON t2.post_id=p2.id WHERE t2.topic=t.topic "
+            "     AND p2.status='video_ask' AND p2.video_state='ask') < ? "
+            "ORDER BY p.score DESC, p.id LIMIT ?", (min_size, limit)).fetchall()
+
+    def kv_prefix(self, prefix: str) -> list[tuple[str, str]]:
+        return [(r[0], r[1]) for r in self.c.execute("SELECT key, value FROM kv WHERE key LIKE ? AND value != ''",
+                                                     (prefix + "%",))]
+
     # --- audits
     def add_audit(self, block_id: int, verdict: str, reason: str) -> int:
         return self._insert("audits", {"block_id": block_id, "verdict": verdict, "reason": reason})

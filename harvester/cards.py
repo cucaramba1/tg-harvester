@@ -68,6 +68,21 @@ def video_kb(pid: int) -> K:
                                B(text="❌ Не надо", callback_data=f"vn:{pid}")]])
 
 
+def topic_card(topic: str, n: int, files: int, samples: list[str]) -> str:
+    dup = f", из них повторы одного файла: {n - files}" if files < n else ""
+    lines = [f"🧩 {topic}", f"{n} видео в очереди{dup}", "", "Примеры подписей:"]
+    lines += [f" • {_trim(x.strip().splitlines()[0] if x.strip() else '(без подписи)', 90)}" for x in samples[:3]]
+    return "\n".join(lines)
+
+
+def topic_kb(tid: int, with_samples: bool = True) -> K:
+    row = [B(text="🔬 Проверить тему", callback_data=f"tc:{tid}")]
+    if with_samples:
+        row.append(B(text="👀 Показать 3", callback_data=f"t3:{tid}"))
+    row.append(B(text="🚫 Тему не надо", callback_data=f"tx:{tid}"))
+    return K(inline_keyboard=[row])
+
+
 REASONS = {1: "неинтересно", 2: "дубль", 3: "реклама"}
 
 

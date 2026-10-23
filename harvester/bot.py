@@ -13,8 +13,8 @@ from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
 from .autovideo import calibration_picks
 from .cards import (REASONS, alts_kb, audit_card, audit_kb, audit_text, confirm_kb, draft_card, draft_kb, more_kb,
-                    more_text, night_text, pilot_card, pilot_kb, reason_kb, status_text, video_card, video_kb,
-                    written_kb)
+                    more_text, night_text, pilot_card, pilot_kb, reason_kb, status_text, topic_card, topic_kb,
+                    video_card, video_kb, written_kb)
 from .config import Settings
 from .db import DB
 from .files import drop_keep
@@ -40,7 +40,8 @@ class App:
         return self.now().hour >= self.s.cards_hour
 
     async def tick(self, bot) -> None:
-        for step in (self.send_alerts, self.send_reports, self.send_video_asks, self.send_cards, self.send_audits,
+        for step in (self.send_alerts, self.send_reports, self.send_topic_asks, self.send_topic_samples,
+                     self.send_video_asks, self.send_cards, self.send_audits,
                      self.send_more_prompt):
             try:
                 await step(bot)
@@ -61,12 +62,59 @@ class App:
                 self.db.kv_set(key + "_sent", raw)
 
     def _video_batch(self, n: int) -> list:
-        """Сначала калибровка (каналы, где мало ответов), остаток слотов лучшие по похожести, как раньше."""
-        picks = calibration_picks(self.s, self.db, n)
+        """Сначала калибровка (каналы, где мало ответов), остаток слотов лучшие по похожести, как раньше.
+        При вопросах по темам по одному спрашиваем только посты мелких тем, посты без темы ждут разметки."""
+        by_topic = self.s.video_by_topic
+        pool = self.db.unmanaged_video_asks(10**6, self.s.topic_min_size) if by_topic else None
+        allowed = {p["id"] for p in pool} if pool is not None else None
+        picks = [p for p in calibration_picks(self.s, self.db, n) if allowed is None or p["id"] in allowed]
         if len(picks) < n:
             seen = {p["id"] for p in picks}
-            picks += [p for p in self.db.video_asks(n + len(picks)) if p["id"] not in seen][: n - len(picks)]
+            rest = pool if pool is not None else self.db.video_asks(n + len(picks))
+            picks += [p for p in rest if p["id"] not in seen][: n - len(picks)]
         return picks
+
+    async def send_topic_asks(self, bot) -> None:
+        """Одна карточка на тему: крупные темы первыми, не больше topic_cards_per_day в день."""
+        if not self.s.video_by_topic or not self._day_open():
+            return
+        key = f"topic_cards:{self.now().date().isoformat()}"
+        left = self.s.topic_cards_per_day - int(self.db.kv_get(key, "0"))
+        for r in self.db.topic_overview():
+            if left <= 0:
+                break
+            if r["n"] < self.s.topic_min_size or self.db.topic_state_of(r["topic"]) is not None:
+                continue
+            tid = self.db.ensure_topic_state(r["topic"])
+            samples = [p["text"] for p in self.db.topic_queue(r["topic"])[:3]]
+            msg = await self._send(bot, topic_card(r["topic"], r["n"], r["files"], samples), topic_kb(tid))
+            self.db.set_topic_state(tid, "asked", msg_id=msg.message_id)
+            left -= 1
+            self.db.kv_set(key, str(self.s.topic_cards_per_day - left))
+
+    async def send_topic_samples(self, bot) -> None:
+        """«Показать 3»: обычные видео-карточки по трём разным файлам темы."""
+        for key, raw in self.db.kv_prefix("show3:"):
+            for pid in json.loads(raw):
+                p = self.db.get_post(pid)
+                if p is None or p["video_state"] != "ask":
+                    continue
+                await self._send(bot, video_card(p, self.s.channel_name(p["chat_id"]), post_link(p["chat_id"], p["msg_id"])),
+                                 video_kb(pid))
+                self.db.update_post(pid, video_state="asked")
+            self.db.kv_set(key, "")
+
+    def _distinct_files(self, topic: str, n: int) -> list[int]:
+        seen, out = set(), []
+        for p in self.db.topic_queue(topic):
+            m = self.db.get_meta(p["id"])
+            doc = m["doc_id"] if m and m["doc_id"] is not None else -p["id"]
+            if doc not in seen:
+                seen.add(doc)
+                out.append(p["id"])
+            if len(out) == n:
+                break
+        return out
 
     async def send_video_asks(self, bot) -> None:
         day = self.now().date().isoformat()
@@ -170,6 +218,7 @@ class App:
         kind, _, rest = data.partition(":")
         h = {"ok": self.on_ok, "no": self.on_no, "alt": self.on_alt, "back": self.on_back, "to": self.on_to,
              "rb": self.on_rb, "rby": self.on_rby, "rbn": self.on_rbn, "vy": self.on_vy, "vn": self.on_vn, "vr": self.on_vr,
+             "tc": self.on_tc, "t3": self.on_t3, "tx": self.on_tx,
              "pl": self.on_pl, "mv": self.on_mv, "ab": self.on_ab, "ak": self.on_ak}.get(kind)
         if h is None or not rest:
             return None, None
@@ -243,6 +292,31 @@ class App:
         drop_keep(self.s, pid)
         self.db.add_label(pid, False, source="video")
         return "❌ Пропускаю. Причина (необязательно):", reason_kb(pid)
+
+    def on_tx(self, tid: int):
+        t = self.db.topic_by_id(tid)
+        if t is None or t["state"] in ("closed", "written"):
+            return "Уже обработано", None
+        posts = self.db.topic_queue(t["topic"])
+        for p in posts:
+            self.db.update_post(p["id"], status="rejected", reason="тема: не надо", video_state="no")
+            drop_keep(self.s, p["id"])
+        self.db.set_topic_state(tid, "closed")
+        return f"🚫 Тема «{t['topic']}» закрыта, видео: {len(posts)}", None
+
+    def on_tc(self, tid: int):
+        t = self.db.topic_by_id(tid)
+        if t is None or t["state"] not in ("asked", "new"):
+            return "Уже обработано", None
+        self.db.set_topic_state(tid, "check")
+        return f"🔬 Тема «{t['topic']}»: проверю ночью, утром пришлю итог", None
+
+    def on_t3(self, tid: int):
+        t = self.db.topic_by_id(tid)
+        if t is None or t["state"] != "asked":
+            return "Уже обработано", None
+        self.db.kv_set(f"show3:{tid}", json.dumps(self._distinct_files(t["topic"], 3)))
+        return None, topic_kb(tid, with_samples=False)
 
     def on_vr(self, pid: int, code: int):
         reason = REASONS.get(code)

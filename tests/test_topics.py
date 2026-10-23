@@ -74,3 +74,108 @@ def test_topic_overview_counts_queue_and_unique_files(db):
     assert ov == {"шея": (3, 2), "сон": (1, 1)}
     db.update_post(c, video_state="asked")                         # уже отвечено: из очереди тем уходит
     assert {r["topic"]: r["n"] for r in db.topic_overview()} == {"шея": 2, "сон": 1}
+
+
+# --- пачка 2: карточка темы в боте
+
+from tests.test_bot import FakeBot, app_at, cbs  # noqa: E402
+
+
+def topical(tmp_path, **over):
+    return make_settings(tmp_path, video_by_topic=True, topic_cards_per_day=2, topic_min_size=2, **over)
+
+
+def seed(db, topic, n, chat=CHAT_A, base=0, score=0.7):
+    ids = []
+    for i in range(n):
+        p = ask(db, chat, base + i + 1, text=f"{topic} видео {i}")
+        db.update_post(p, score=score - i / 100)
+        db.set_topic(p, topic)
+        ids.append(p)
+    return ids
+
+
+def test_topic_card_sent_once_with_three_buttons_and_counts(tmp_path, db):
+    s = topical(tmp_path)
+    ids = seed(db, "шея и осанка", 3)
+    db.save_meta(ids[0], 111, 1, 1.0); db.save_meta(ids[1], 111, 1, 1.0); db.save_meta(ids[2], 222, 1, 1.0)
+    bot = FakeBot()
+    app = app_at(s, db, hour=10)
+    asyncio.run(app.tick(bot))
+    asyncio.run(app.tick(bot))
+    cards = [m for m in bot.sent if "шея и осанка" in m[1]]
+    assert len(cards) == 1
+    tid = db.topic_state_id("шея и осанка")
+    assert cbs(cards[0][2]["reply_markup"]) == [f"tc:{tid}", f"t3:{tid}", f"tx:{tid}"]
+    assert "3 видео" in cards[0][1] and "повтор" in cards[0][1]    # 3 поста, 2 разных файла
+    assert db.topic_state_of("шея и осанка") == "asked"
+
+
+def test_topic_cards_capped_per_day_biggest_first_and_small_topics_skipped(tmp_path, db):
+    s = topical(tmp_path)
+    seed(db, "сон", 2, base=0)
+    seed(db, "колени", 5, base=10)
+    seed(db, "зрение", 3, base=20)
+    seed(db, "одиночка", 1, base=30)
+    bot = FakeBot()
+    asyncio.run(app_at(s, db, hour=10).tick(bot))
+    titles = [m[1] for m in bot.sent if m[1].startswith("🧩")]
+    assert len(titles) == 2 and "колени" in titles[0] and "зрение" in titles[1]   # лимит 2 в день, сон и одиночка ждут
+
+
+def test_topic_managed_posts_are_not_asked_one_by_one(tmp_path, db):
+    s = topical(tmp_path, video_asks_per_day=5)
+    seed(db, "шея", 3, base=0)
+    lone = ask(db, CHAT_A, 99, text="одиночное видео")
+    db.set_topic(lone, "одиночка")
+    untagged = ask(db, CHAT_A, 100, text="без темы пока")
+    bot = FakeBot()
+    asyncio.run(app_at(s, db, hour=10).tick(bot))
+    video_cards = [m for m in bot.sent if "разобрать видео" in m[1]]
+    assert len(video_cards) == 1 and "одиночное видео" in video_cards[0][1]
+    assert db.get_post(untagged)["video_state"] == "ask"
+
+
+def test_close_topic_rejects_all_posts_without_labels(tmp_path, db):
+    s = topical(tmp_path)
+    ids = seed(db, "шея", 3)
+    app = app_at(s, db)
+    asyncio.run(app.tick(FakeBot()))
+    tid = db.topic_state_id("шея")
+    text, kb = app.handle_callback(f"tx:{tid}")
+    assert "закрыта" in text and kb is None and "3" in text
+    for p in ids:
+        r = db.get_post(p)
+        assert (r["status"], r["video_state"], r["reason"]) == ("rejected", "no", "тема: не надо")
+    assert db.c.execute("SELECT COUNT(*) FROM labels").fetchone()[0] == 0   # решение по теме не учит вкус по подписям
+    assert db.topic_state_of("шея") == "closed"
+
+
+def test_check_topic_marks_state_for_night_job(tmp_path, db):
+    s = topical(tmp_path)
+    seed(db, "шея", 2)
+    app = app_at(s, db)
+    asyncio.run(app.tick(FakeBot()))
+    tid = db.topic_state_id("шея")
+    text, kb = app.handle_callback(f"tc:{tid}")
+    assert "ночью" in text and kb is None and db.topic_state_of("шея") == "check"
+
+
+def test_show_three_sends_distinct_files_as_ordinary_video_cards(tmp_path, db):
+    s = topical(tmp_path)
+    ids = seed(db, "шея", 5)
+    for pid, doc in zip(ids, (1, 1, 2, 3, 4)):
+        db.save_meta(pid, doc, 1, 1.0)           # первые два поста один и тот же файл
+    bot = FakeBot()
+    app = app_at(s, db)
+    asyncio.run(app.tick(bot))
+    tid = db.topic_state_id("шея")
+    text, kb = app.handle_callback(f"t3:{tid}")
+    assert cbs(kb) == [f"tc:{tid}", f"tx:{tid}"]            # кнопка «показать 3» заменяется, остальные остаются
+    before = len(bot.sent)
+    asyncio.run(app.tick(bot))
+    shown = [m for m in bot.sent[before:] if "разобрать видео" in m[1]]
+    assert len(shown) == 3
+    docs = {db.get_meta(p)["doc_id"] for p in ids if db.get_post(p)["video_state"] == "asked"}
+    assert len(docs) == 3                                    # три разных файла, не повторы
+    assert cbs(shown[0][2]["reply_markup"])[0].startswith("vy:")
