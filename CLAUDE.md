@@ -4,9 +4,10 @@
 
 ## Команды
 - `scripts/setup.sh status | logs | restart | night-now | stop`. Канал добавляется строкой в `config/channels.yaml` и `restart`.
-- Тесты: `uv run pytest -q` (84 проходят).
+- Тесты: `uv run pytest -q` (108 проходят).
 
 ## Правила
+- Видео-вопросы: ответы Некита пишутся в `labels` (source=video), `harvester autovideo report` показывает, что решило бы правило. Автоответы выключены (`video_auto: off`), подпись поста слабо предсказывает его вкус, см. HANDOFF.
 - Вызов Claude только через `harvester/brain.py`: модель `sonnet` по умолчанию (`CLAUDE_BATCH_MODEL`), лимит вызовов за ночь `max_calls_per_night` в `config/settings.yaml`.
 - Когда лимит Claude кончается, ночь не обрывается: остаток разбирает локальный FreeLLMAPI (`router_fallback` в `config/settings.yaml`, `run_router` в `brain.py`, модель `FREELLM_MODEL`, по умолчанию `gemini-3.8-flash`). В запасном режиме не передаются «Мои цели» и картинки. Роутер должен работать на `127.0.0.1:3001` (launchd `com.cucaramba.freellmapi`). Замер на 99 постах: Sonnet 88, Gemini 82, Haiku 80 совпадений с решениями Некита.
 - Telethon-сессия `data/harvester.session` своя. Не использовать её параллельно с живым процессом без нужды и не копировать.
