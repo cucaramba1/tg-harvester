@@ -11,8 +11,9 @@ from aiogram import Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
-from .cards import (alts_kb, audit_card, audit_kb, audit_text, confirm_kb, draft_card, draft_kb, more_kb, more_text,
-                    night_text, pilot_card, pilot_kb, status_text, video_card, video_kb, written_kb)
+from .cards import (REASONS, alts_kb, audit_card, audit_kb, audit_text, confirm_kb, draft_card, draft_kb, more_kb,
+                    more_text, night_text, pilot_card, pilot_kb, reason_kb, status_text, video_card, video_kb,
+                    written_kb)
 from .config import Settings
 from .db import DB
 from .files import drop_keep
@@ -159,7 +160,7 @@ class App:
     def handle_callback(self, data: str):
         kind, _, rest = data.partition(":")
         h = {"ok": self.on_ok, "no": self.on_no, "alt": self.on_alt, "back": self.on_back, "to": self.on_to,
-             "rb": self.on_rb, "rby": self.on_rby, "rbn": self.on_rbn, "vy": self.on_vy, "vn": self.on_vn,
+             "rb": self.on_rb, "rby": self.on_rby, "rbn": self.on_rbn, "vy": self.on_vy, "vn": self.on_vn, "vr": self.on_vr,
              "pl": self.on_pl, "mv": self.on_mv, "ab": self.on_ab, "ak": self.on_ak}.get(kind)
         if h is None or not rest:
             return None, None
@@ -225,12 +226,23 @@ class App:
 
     def on_vy(self, pid: int):
         self.db.update_post(pid, video_state="yes")
+        self.db.add_label(pid, True, source="video")
         return "🎬 Разберу видео, карточка придёт после ночного разбора", None
 
     def on_vn(self, pid: int):
         self.db.update_post(pid, status="rejected", reason="видео: не надо", video_state="no")
         drop_keep(self.s, pid)
-        return "❌ Пропускаю", None
+        self.db.add_label(pid, False, source="video")
+        return "❌ Пропускаю. Причина (необязательно):", reason_kb(pid)
+
+    def on_vr(self, pid: int, code: int):
+        reason = REASONS.get(code)
+        if reason is None:
+            return None, None
+        if self.db.c.execute("SELECT 1 FROM labels WHERE post_id=?", (pid,)).fetchone() is None:
+            return "Не найдено", None
+        self.db.set_label_reason(pid, reason)
+        return f"❌ Пропускаю ({reason})", None
 
     def on_mv(self, yes: int):
         self.db.kv_set("more_msg", "")

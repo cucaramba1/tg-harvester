@@ -285,3 +285,21 @@ def test_more_prompt_deleted_at_midnight_if_unanswered(s, db):
     next_day = App(s, db, Writer(s, db), now=lambda: datetime(2026, 10, 12, 0, 0), pause=0)
     asyncio.run(next_day.tick(bot))
     assert bot.deleted == [prompt_id] and len(bot.sent) == prompt_id
+
+
+def test_video_answers_become_labels_with_reason_buttons(s, db):
+    app = app_at(s, db)
+    yes = db.add_post(CHAT_A, 1, None, "d", "видео про промпты", "video")
+    no = db.add_post(CHAT_A, 2, None, "d", "ещё видео", "video")
+    db.update_post(yes, status="video_ask", video_state="asked")
+    db.update_post(no, status="video_ask", video_state="asked")
+    app.handle_callback(f"vy:{yes}")
+    text, kb = app.handle_callback(f"vn:{no}")
+    lab = {r["post_id"]: (r["useful"], r["source"]) for r in db.c.execute("SELECT * FROM labels")}
+    assert lab == {yes: (1, "video"), no: (0, "video")}
+    assert cbs(kb) == [f"vr:{no}:1", f"vr:{no}:2", f"vr:{no}:3"]
+    text, kb = app.handle_callback(f"vr:{no}:2")
+    assert kb is None and "дубль" in text
+    assert db.c.execute("SELECT reason FROM labels WHERE post_id=?", (no,)).fetchone()[0] == "дубль"
+    assert app.handle_callback(f"vr:{no}:9") == (None, None)  # кривой код причины
+    assert app.handle_callback("vr:999:1") == ("Не найдено", None)  # метки нет, пост не трогаем

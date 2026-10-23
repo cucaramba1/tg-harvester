@@ -68,7 +68,13 @@ CREATE TABLE IF NOT EXISTS blocks(
   created TEXT NOT NULL,
   rolled_back INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS labels(post_id INTEGER PRIMARY KEY, useful INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS labels(
+  post_id INTEGER PRIMARY KEY,
+  useful INTEGER NOT NULL,
+  reason TEXT,
+  source TEXT NOT NULL DEFAULT 'import',
+  ts TEXT
+);
 CREATE TABLE IF NOT EXISTS audits(
   id INTEGER PRIMARY KEY,
   block_id INTEGER NOT NULL,
@@ -99,6 +105,13 @@ class DB:
         self.c.execute("PRAGMA journal_mode=WAL")
         self.c.execute("PRAGMA busy_timeout=30000")
         self.c.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        have = {r["name"] for r in self.c.execute("PRAGMA table_info(labels)")}
+        for col, ddl in (("reason", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'import'"), ("ts", "TEXT")):
+            if col not in have:
+                self.c.execute(f"ALTER TABLE labels ADD COLUMN {col} {ddl}")
 
     def _update(self, table: str, key: str, kval, fields: dict) -> None:
         if not fields:
@@ -224,8 +237,23 @@ class DB:
         self.c.execute("UPDATE blocks SET rolled_back=1 WHERE id=?", (bid,))
 
     # --- labels
-    def add_label(self, pid: int, useful: bool) -> None:
-        self.c.execute("INSERT OR REPLACE INTO labels(post_id, useful) VALUES(?, ?)", (pid, int(useful)))
+    def add_label(self, pid: int, useful: bool, *, source: str = "pilot") -> None:
+        """Ответ Некита. Повторный ответ меняет вердикт, но не стирает уже записанную причину."""
+        self.c.execute(
+            "INSERT INTO labels(post_id, useful, source, ts) VALUES(?, ?, ?, ?) "
+            "ON CONFLICT(post_id) DO UPDATE SET useful=excluded.useful, source=excluded.source, ts=excluded.ts",
+            (pid, int(useful), source, _now()))
+
+    def set_label_reason(self, pid: int, reason: str) -> None:
+        self.c.execute("UPDATE labels SET reason=? WHERE post_id=?", (reason, pid))
+
+    def backfill_video_labels(self) -> int:
+        """Ответы на видео-вопросы до появления меток лежали только в video_state: достаём их, не трогая готовые метки."""
+        cur = self.c.execute(
+            "INSERT OR IGNORE INTO labels(post_id, useful, source, ts) "
+            "SELECT id, CASE WHEN video_state='no' THEN 0 ELSE 1 END, 'video', ? FROM posts "
+            "WHERE video_state IN ('yes','done','no')", (_now(),))
+        return cur.rowcount
 
     def labeled(self) -> list:
         return self.c.execute("SELECT p.score, p.section_score, l.useful FROM labels l "

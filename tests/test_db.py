@@ -59,3 +59,46 @@ def test_alerts_pop_once_and_kv(db):
     assert db.kv_get("k", "d") == "d"
     db.kv_set("k", "v")
     assert db.kv_get("k") == "v"
+
+
+def _old_labels_db(path):
+    import sqlite3
+    c = sqlite3.connect(path)
+    c.execute("CREATE TABLE labels(post_id INTEGER PRIMARY KEY, useful INTEGER NOT NULL)")
+    c.execute("INSERT INTO labels VALUES(7, 1)")
+    c.commit()
+    c.close()
+
+
+def test_labels_migrate_keeps_old_rows(tmp_path):
+    from harvester.db import DB
+    p = tmp_path / "old.db"
+    _old_labels_db(p)
+    db = DB(p)
+    row = db.c.execute("SELECT * FROM labels WHERE post_id=7").fetchone()
+    assert row["useful"] == 1 and row["source"] == "import" and row["reason"] is None
+    DB(p)  # второй запуск не падает на уже добавленных колонках
+
+
+def test_add_label_keeps_reason_and_source(db):
+    db.add_label(1, False, source="video")
+    db.set_label_reason(1, "дубль")
+    db.add_label(1, False, source="video")
+    r = db.c.execute("SELECT * FROM labels WHERE post_id=1").fetchone()
+    assert (r["useful"], r["source"], r["reason"]) == (0, "video", "дубль") and r["ts"]
+
+
+def test_backfill_video_labels_from_video_state(db):
+    a = db.add_post(CHAT_A, 1, None, "d", "t", "video")
+    b = db.add_post(CHAT_A, 2, None, "d", "t", "video")
+    c = db.add_post(CHAT_A, 3, None, "d", "t", "video")
+    d = db.add_post(CHAT_A, 4, None, "d", "t", "video")
+    db.update_post(a, video_state="yes")
+    db.update_post(b, video_state="no")
+    db.update_post(c, video_state="done")
+    db.update_post(d, video_state="ask")
+    db.add_label(c, False, source="pilot")  # уже размечено, не перетираем
+    assert db.backfill_video_labels() == 2
+    got = {r["post_id"]: (r["useful"], r["source"]) for r in db.c.execute("SELECT * FROM labels")}
+    assert got == {a: (1, "video"), b: (0, "video"), c: (0, "pilot")}
+    assert db.backfill_video_labels() == 0

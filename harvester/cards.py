@@ -68,6 +68,15 @@ def video_kb(pid: int) -> K:
                                B(text="❌ Не надо", callback_data=f"vn:{pid}")]])
 
 
+REASONS = {1: "неинтересно", 2: "дубль", 3: "реклама"}
+
+
+def reason_kb(pid: int) -> K:
+    return K(inline_keyboard=[[B(text="😴 неинтересно", callback_data=f"vr:{pid}:1"),
+                               B(text="🔁 дубль", callback_data=f"vr:{pid}:2"),
+                               B(text="📢 реклама", callback_data=f"vr:{pid}:3")]])
+
+
 def more_text(shown: int, left: int, step: int) -> str:
     return f"Показал {shown} видео за сегодня, в очереди ещё {left}. Полистать ещё {step}?"
 
