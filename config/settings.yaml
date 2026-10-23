@@ -29,3 +29,9 @@ video_asks_per_day: 50   # вопросов «разобрать видео» в
 cards_hour: 9
 snapshot_days: 30
 attachments_dir: Вложения/Telegram
+router_tail_batches: 5     # сверх max_calls_per_night ещё столько батчей уходит в FreeLLMAPI (без целей и картинок), нужен router_fallback
+video_calib_n: 25          # у каналов из топ-N по очереди с меньшим числом ответов видео-вопросы идут вперёд очереди
+video_calib_top: 6
+video_auto: off            # off | dry | on: автоответы по видео (правило в harvester/autovideo.py)
+video_auto_conf: 0.9
+video_auto_min_n: 8

@@ -36,6 +36,8 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("login", "live", "bot", "night", "audit", "calibrate"):
         sub.add_parser(name)
+    av = sub.add_parser("autovideo")
+    av.add_argument("action", choices=["backfill", "report"])
     sec = sub.add_parser("section")
     sec.add_argument("name")
     a = p.parse_args(argv)
@@ -46,6 +48,14 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         from .vault_setup import ensure_section
         created = ensure_section(s.vault, a.name)
         print("Создано: " + ", ".join(created) if created else f"Раздел «{a.name}» уже есть")
+    elif a.cmd == "autovideo":
+        from .autovideo import report_text
+        from .db import DB
+        db = DB(s.db_path)
+        if a.action == "backfill":
+            print(f"Добавлено меток из video_state: {db.backfill_video_labels()}")
+        else:
+            print(report_text(s, db))
     elif a.cmd == "login":
         asyncio.run(_login(s))
     elif a.cmd == "live":

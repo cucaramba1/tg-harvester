@@ -71,6 +71,13 @@ class Settings:
     video_asks_per_day: int = 5
     max_keep_gb: float = 1.0
     router_fallback: bool = False
+    video_calib_n: int = 25
+    video_calib_top: int = 6
+    video_calib_channels: tuple = ()
+    router_tail_batches: int = 0
+    video_auto: str = "off"
+    video_auto_conf: float = 0.9
+    video_auto_min_n: int = 8
 
     @property
     def data_dir(self) -> Path:
@@ -177,4 +184,11 @@ def load_settings(root: Path | None = None) -> Settings:
         video_asks_per_day=int(cfg.get("video_asks_per_day", 5)),
         max_keep_gb=float(cfg.get("max_keep_gb", 1.0)),
         router_fallback=bool(cfg.get("router_fallback", False)),
+        video_calib_n=int(cfg.get("video_calib_n", 25)),
+        video_calib_top=int(cfg.get("video_calib_top", 6)),
+        router_tail_batches=int(cfg.get("router_tail_batches", 0)),
+        video_auto=str(cfg.get("video_auto", "off")),
+        video_auto_conf=float(cfg.get("video_auto_conf", 0.9)),
+        video_auto_min_n=int(cfg.get("video_auto_min_n", 8)),
+        video_calib_channels=tuple(int(x) for x in cfg.get("video_calib_channels") or ()),
     )

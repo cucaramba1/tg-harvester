@@ -153,3 +153,30 @@ def test_images_only_without_ocr_and_capped(s, db, tmp_path):
     assert kw["tools"] == ("Read",) and str(img1) in prompt and str(img2) not in prompt
     assert kw["add_dirs"] == (str(img1.parent),)
     assert fake.calls[1][1]["tools"] == ()
+
+
+def test_router_tail_continues_after_claude_limit_without_goals(s, db):
+    import dataclasses
+    setup_vault(s)
+    (s.vault / s.goals_note).parent.mkdir(parents=True, exist_ok=True)
+    (s.vault / s.goals_note).write_text("СЕКРЕТНАЯ ЦЕЛЬ", "utf-8")
+    ids = [cand(db, i, score=0.9 - i / 100) for i in range(1, 9)]  # 8 постов, батчи по 2
+    s2 = dataclasses.replace(s, max_calls_per_night=1, router_fallback=True, router_tail_batches=2)
+    claude = FakeClaude([lambda p: answer(item(ids[0]), item(ids[1]))])
+    router = FakeClaude([lambda p: answer(item(ids[2]), item(ids[3])), lambda p: answer(item(ids[4]), item(ids[5]))])
+    rep = asyncio.run(run_night(s2, db, claude=claude, router=router))
+    assert (len(claude.calls), len(router.calls)) == (1, 2) and rep["calls"] == 3
+    assert rep["tail"] == 2 and rep["drafted"] == 6
+    assert all("СЕКРЕТНАЯ ЦЕЛЬ" not in c[0] for c in router.calls) and "СЕКРЕТНАЯ ЦЕЛЬ" in claude.calls[0][0]
+    assert db.get_post(ids[6])["status"] == "candidate"  # дальше хвоста не идём
+
+
+def test_no_router_tail_when_disabled(s, db):
+    import dataclasses
+    setup_vault(s)
+    for i in range(1, 7):
+        cand(db, i)
+    s2 = dataclasses.replace(s, max_calls_per_night=1, router_fallback=True, router_tail_batches=0)
+    claude, router = FakeClaude([answer()]), FakeClaude([])
+    asyncio.run(run_night(s2, db, claude=claude, router=router))
+    assert len(claude.calls) == 1 and len(router.calls) == 0

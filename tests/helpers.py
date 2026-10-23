@@ -21,7 +21,7 @@ def make_settings(tmp: Path, **over) -> Settings:
         min_chars=20, ad_markers=["erid", "розыгрыш"], max_images=4, min_free_gb=10, embed_model="m",
         note_threshold=0.6, section_threshold=0.45, explore_quota=2, skip_sections=["Скиллы на машине"],
         batch_size=2, max_calls_per_night=3, retro_multiplier=2.0, max_images_per_night=1, claude_timeout=10,
-        cards_per_day=2, video_asks_per_day=2, cards_hour=9, snapshot_days=30, attachments_dir="Вложения/Telegram",
+        cards_per_day=2, video_asks_per_day=2, video_calib_n=0, cards_hour=9, snapshot_days=30, attachments_dir="Вложения/Telegram",
     )
     base.update(over)
     return Settings(**base)

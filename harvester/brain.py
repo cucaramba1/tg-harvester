@@ -250,12 +250,14 @@ async def run_night(s: Settings, db: DB, claude=run_claude, router=run_router) -
            "skipped": 0, "errors": 0, "aborted": None, "retro": retro}
     images_left = s.max_images_per_night
     on_router = False
+    tail = s.router_tail_batches if s.router_fallback else 0  # батчи сверх лимита Claude уходят в бесплатный роутер
+    cap = limit + tail
     for batch in chunks(queue, s.batch_size):
-        if rep["calls"] >= limit:
+        if rep["calls"] >= cap:
             break
         imgs: list[tuple[int, str]] = []
         for p in batch:
-            if images_left and not (p["extra_text"] or "").strip():
+            if images_left and not on_router and rep["calls"] < limit and not (p["extra_text"] or "").strip():
                 path = next((x for x in json.loads(p["images"]) if Path(x).exists()), None)
                 if path:
                     imgs.append((p["id"], path))
@@ -265,9 +267,12 @@ async def run_night(s: Settings, db: DB, claude=run_claude, router=run_router) -
                   add_dirs=tuple(sorted({str(Path(x).parent) for _, x in imgs})), timeout=s.claude_timeout)
         raw = None
         for _ in range(2):
-            if rep["calls"] >= limit:
+            if rep["calls"] >= cap:
                 break
             rep["calls"] += 1
+            if rep["calls"] > limit:
+                on_router = True
+                rep["tail"] = rep.get("tail", 0) + 1
             try:
                 if on_router:  # без целей Некита (личное не уходит во внешние бесплатные тиры) и без картинок
                     raw = await router(s, build_prompt(batch, sections, "", s.channel_name, []),

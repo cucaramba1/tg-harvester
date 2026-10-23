@@ -303,3 +303,16 @@ def test_video_answers_become_labels_with_reason_buttons(s, db):
     assert db.c.execute("SELECT reason FROM labels WHERE post_id=?", (no,)).fetchone()[0] == "дубль"
     assert app.handle_callback(f"vr:{no}:9") == (None, None)  # кривой код причины
     assert app.handle_callback("vr:999:1") == ("Не найдено", None)  # метки нет, пост не трогаем
+
+
+def test_video_asks_calibration_goes_before_best_score(tmp_path, db):
+    from tests.helpers import CHAT_B, make_settings
+    s = make_settings(tmp_path, video_calib_n=2, video_calib_channels=(CHAT_B,), video_asks_per_day=2)
+    for chat, i, sc in ((CHAT_A, 1, 0.9), (CHAT_A, 2, 0.8), (CHAT_B, 3, 0.2), (CHAT_B, 4, 0.1)):
+        pid = db.add_post(chat, i, None, "2026-10-01T00:00:00+00:00", f"видео {i}", "video")
+        db.update_post(pid, status="video_ask", video_state="ask", score=sc)
+    bot = FakeBot()
+    app = app_at(s, db, hour=10)
+    asyncio.run(app.tick(bot))
+    texts = [m[1] for m in bot.sent]
+    assert len(texts) == 2 and "видео 3" in texts[0] and "видео 4" in texts[1]  # слабые, но из канала без ответов

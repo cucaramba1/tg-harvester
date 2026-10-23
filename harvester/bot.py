@@ -11,6 +11,7 @@ from aiogram import Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
+from .autovideo import calibration_picks
 from .cards import (REASONS, alts_kb, audit_card, audit_kb, audit_text, confirm_kb, draft_card, draft_kb, more_kb,
                     more_text, night_text, pilot_card, pilot_kb, reason_kb, status_text, video_card, video_kb,
                     written_kb)
@@ -59,6 +60,14 @@ class App:
                 await self._send(bot, render(json.loads(raw)))
                 self.db.kv_set(key + "_sent", raw)
 
+    def _video_batch(self, n: int) -> list:
+        """Сначала калибровка (каналы, где мало ответов), остаток слотов лучшие по похожести, как раньше."""
+        picks = calibration_picks(self.s, self.db, n)
+        if len(picks) < n:
+            seen = {p["id"] for p in picks}
+            picks += [p for p in self.db.video_asks(n + len(picks)) if p["id"] not in seen][: n - len(picks)]
+        return picks
+
     async def send_video_asks(self, bot) -> None:
         day = self.now().date().isoformat()
         key = f"video_asks:{day}"
@@ -66,7 +75,7 @@ class App:
         sent = int(self.db.kv_get(key, "0"))
         pending = int(self.db.kv_get("video_more", "0"))  # «Да» на «полистать ещё?»: не зависит ни от даты, ни от часа
         day_room = max(0, step - sent) if self._day_open() else 0
-        for p in self.db.video_asks(day_room + pending):
+        for p in self._video_batch(day_room + pending):
             await self._send(bot, video_card(p, self.s.channel_name(p["chat_id"]), post_link(p["chat_id"], p["msg_id"])),
                              video_kb(p["id"]))
             self.db.update_post(p["id"], video_state="asked")
