@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import subprocess
+import sys
 import time
 from datetime import date
 
@@ -11,12 +14,12 @@ from .collector import Collector, TgClient
 from .config import Settings
 from .db import DB
 from .enricher import Enricher
-from .matcher import FastEmbedder, Matcher, VaultVectors
 from .topic_check import run_topic_checks
 from .topics import fetch_meta, split_big_topics, tag_topics
 from .writer import Writer
 
 log = logging.getLogger(__name__)
+MATCH_EVERY = 3600  # постов ~3 в час, разбор черновиков ночью: матчить чаще незачем
 
 
 async def _collect(col: Collector) -> None:
@@ -29,13 +32,18 @@ async def _collect(col: Collector) -> None:
             await asyncio.sleep(60)
 
 
-async def _process(db: DB, enr: Enricher, mat: Matcher, vectors: VaultVectors) -> None:
-    refreshed = None
+async def _run_match() -> None:
+    """Матчинг отдельным процессом (`harvester match`): модель не висит в памяти live между запусками."""
+    proc = await asyncio.create_subprocess_exec(sys.executable, "-m", "harvester", "match",
+                                                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    if await proc.wait():
+        log.error("harvester match завершился с кодом %s, см. logs/harvester-match.log", proc.returncode)
+
+
+async def _process(db: DB, enr: Enricher) -> None:
+    last_match = None
     while True:
         try:
-            if refreshed is None or time.monotonic() - refreshed > 86400:
-                await asyncio.to_thread(vectors.refresh)
-                refreshed = time.monotonic()
             busy = False
             for p in db.posts("new", 20):
                 busy = True
@@ -43,9 +51,9 @@ async def _process(db: DB, enr: Enricher, mat: Matcher, vectors: VaultVectors) -
             for p in db.videos_approved(3):
                 busy = True
                 await enr.analyze_video(p)
-            for p in db.posts("enriched", 50):
-                busy = True
-                await asyncio.to_thread(mat.process, p)
+            if db.posts("enriched", 1) and (last_match is None or time.monotonic() - last_match > MATCH_EVERY):
+                last_match = time.monotonic()
+                await _run_match()
             if not busy:
                 await asyncio.sleep(10)
         except Exception:
@@ -89,6 +97,27 @@ async def _tick(app: App, bot) -> None:
         await asyncio.sleep(60)
 
 
+async def _rss_guard() -> None:
+    """Потолок памяти: при превышении процесс выходит, launchd (KeepAlive) поднимает его заново. Каждые 10 минут пишет RSS в лог."""
+    limit = int(os.environ.get("HARVESTER_RSS_MAX_MB", "700"))
+    n = 0
+    while True:
+        await asyncio.sleep(60)
+        try:
+            out = await asyncio.to_thread(subprocess.check_output, ["ps", "-o", "rss=", "-p", str(os.getpid())])
+            mb = int(out) // 1024
+        except Exception:
+            log.exception("rss_guard")
+            continue
+        n += 1
+        if n % 10 == 0:
+            log.info("RSS %d МБ (потолок %d)", mb, limit)
+        if mb > limit:
+            log.error("RSS %d МБ выше потолка %d МБ, выхожу для перезапуска", mb, limit)
+            logging.shutdown()
+            os._exit(75)
+
+
 async def run_live(s: Settings) -> None:
     from aiogram import Bot
     from telethon import TelegramClient, events
@@ -112,13 +141,12 @@ async def run_live(s: Settings) -> None:
     col = Collector(s, db, tg)
     await col.init()
     client.add_event_handler(col.on_new, events.NewMessage(chats=[c.id for c in s.channels]))
-    vectors = VaultVectors(s, FastEmbedder(s.embed_model, s.models_dir))
     app = App(s, db, Writer(s, db))
     dp = build_dispatcher(app)
     log.info("TG Harvester запущен")
-    await asyncio.gather(_collect(col), _process(db, Enricher(s, db, tg), Matcher(s, db, vectors), vectors),
+    await asyncio.gather(_collect(col), _process(db, Enricher(s, db, tg)),
                          _topics_prep(s, db, tg), _topic_checks(s, db, tg),
-                         _tick(app, bot), dp.start_polling(bot, handle_signals=False))
+                         _tick(app, bot), _rss_guard(), dp.start_polling(bot, handle_signals=False))
 
 
 async def run_bot(s: Settings) -> None:

@@ -43,6 +43,15 @@ def foreign_whisper() -> bool:
     return subprocess.run(["pgrep", "-f", "mlx_whisper"], capture_output=True).returncode == 0
 
 
+def mem_free_pct() -> float:
+    """Свободная память системы в процентах (memory_pressure). При сбое чтения считаем, что памяти мало."""
+    try:
+        out = subprocess.run(["memory_pressure"], capture_output=True, text=True, timeout=20).stdout
+        return float(re.search(r"free percentage: (\d+)%", out).group(1))
+    except Exception:
+        return 0.0
+
+
 def _file_groups(db: DB, topic: str) -> list[list]:
     """Посты темы, сгруппированные по файлу: [представитель, повторы...]. Без метаданных пост сам по себе."""
     groups: dict[object, list] = {}
@@ -116,7 +125,7 @@ async def _merge(s: Settings, db: DB, router, topic: str, groups: list[list]) ->
 
 async def run_topic_checks(s: Settings, db: DB, tg, router, *, now=datetime.now, extract=extract_video, stt=None,
                            ocr=ocr_image, loudness=mean_volume, foreign_whisper=foreign_whisper, disk=free_gb,
-                           force: bool = False) -> dict:
+                           mem_free=mem_free_pct, force: bool = False) -> dict:
     """Один проход: проверить непроверенные файлы тем в состоянии check (в пределах бюджета ночи) и склеить готовые темы."""
     stt = stt or (lambda p: transcribe(s, p))
     stamp = now()
@@ -137,6 +146,8 @@ async def run_topic_checks(s: Settings, db: DB, tg, router, *, now=datetime.now,
                 return {**rep, "skipped": "диск"}
             if foreign_whisper():
                 return {**rep, "skipped": "чужой Whisper"}
+            if mem_free() < s.topic_min_free_mem_pct:  # 8 ГБ: Whisper рядом с VS Code и Claude Code загоняет мак в своп
+                return {**rep, "skipped": "память"}
             await _check_file(s, db, tg, g[0], extract=extract, stt=stt, ocr=ocr, loudness=loudness)
             used += 1
             rep["checked"] += 1

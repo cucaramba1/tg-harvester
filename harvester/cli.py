@@ -34,7 +34,7 @@ async def _login(s) -> None:
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     p = argparse.ArgumentParser(prog="harvester")
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("login", "live", "bot", "night", "audit", "calibrate"):
+    for name in ("login", "live", "bot", "night", "audit", "calibrate", "match"):
         sub.add_parser(name)
     av = sub.add_parser("autovideo")
     av.add_argument("action", choices=["backfill", "report"])
@@ -84,6 +84,22 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         from .auditor import run_audit
         from .db import DB
         print(asyncio.run(run_audit(s, DB(s.db_path))))
+    elif a.cmd == "match":
+        # Модель весит ~700 МБ и внутри процесса до конца не выгружается, поэтому матчинг живёт в коротком процессе:
+        # live запускает его раз в час, память возвращается системе при выходе.
+        from .db import DB
+        from .matcher import FastEmbedder, Matcher, VaultVectors
+        db = DB(s.db_path)
+        vectors = VaultVectors(s, FastEmbedder(s.embed_model, s.models_dir))
+        vectors.refresh()
+        mat, n = Matcher(s, db, vectors), 0
+        for p in db.posts("enriched", 10**6):
+            try:
+                mat.process(p)
+                n += 1
+            except Exception:
+                logging.exception("match %s", p["id"])
+        print(f"Сопоставлено постов: {n}")
     elif a.cmd == "calibrate":
         from .db import DB
         from .matcher import calibrate

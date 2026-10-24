@@ -28,7 +28,7 @@ class FastEmbedder:
         self.m = TextEmbedding(model_name=model, cache_dir=str(cache_dir))
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        vs = np.array(list(self.m.embed(texts)), dtype=np.float32)
+        vs = np.array(list(self.m.embed(texts, batch_size=16)), dtype=np.float32)  # дефолт 256 даёт пик ~+600 МБ
         return vs / np.maximum(np.linalg.norm(vs, axis=1, keepdims=True), 1e-9)
 
 

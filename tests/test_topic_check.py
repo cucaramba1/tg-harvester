@@ -131,3 +131,22 @@ def test_posts_missing_from_router_answer_become_own_groups(tmp_path, db):
     rep = json.loads(db.topic_by_id(tid)["report"])
     covered = sorted(i for g in rep["groups"] for i in g["posts"])
     assert covered == sorted(ids) and 99999 not in covered
+
+
+def test_low_free_memory_stops_checks_before_any_download(tmp_path, db):
+    s, ids, tid = make_world(tmp_path, db, [1, 2])
+    t, calls = tools()
+    tg = FakeTg()
+    out = asyncio.run(run_topic_checks(s, db, tg, FakeClaude([]), now=NIGHT, mem_free=lambda: 10.0, **t))
+    assert tg.downloaded == [] and out["skipped"] == "память" and db.topic_state_of("шея") == "check"
+
+
+def test_memory_is_rechecked_between_files(tmp_path, db):
+    s, ids, tid = make_world(tmp_path, db, [1, 2, 3])
+    t, calls = tools()
+    tg = FakeTg()
+    levels = iter([60.0, 60.0, 5.0])                       # на третьем ролике памяти уже не хватает
+    router = FakeClaude([])
+    out = asyncio.run(run_topic_checks(s, db, tg, router, now=NIGHT, mem_free=lambda: next(levels), **t))
+    assert len(tg.downloaded) == 2 and out["skipped"] == "память"
+    assert db.topic_state_of("шея") == "check"             # тема не склеена, остаток проверим в следующий раз
