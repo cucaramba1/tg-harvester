@@ -74,7 +74,13 @@ class Collector:
     async def init(self) -> None:
         floor_at = _midnight(self.s.retro_until)
         for ch in self.s.channels:
-            if self.db.channel(ch.id) is not None:
+            st = self.db.channel(ch.id)
+            if st is not None:
+                if st["phase"] != "new":
+                    # пока процесс лежал (рестарт, сон, os._exit сторожа), события не приходили: добираем
+                    # с последнего известного id, дубли отсечёт UNIQUE(chat_id, msg_id)
+                    top = max(st["new_cursor"] or 0, self.db.max_msg_id(ch.id))
+                    self.db.save_channel(ch.id, new_cursor=top, phase="new")
                 continue
             mark = await self.tg.read_mark(ch.id)
             floor = await self.tg.first_before(ch.id, floor_at) or 0

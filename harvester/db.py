@@ -203,6 +203,9 @@ class DB:
             "ORDER BY RANDOM() LIMIT ?", (n,)).fetchall()
 
     # --- channels
+    def max_msg_id(self, chat_id: int) -> int:
+        return self.c.execute("SELECT COALESCE(MAX(msg_id), 0) FROM posts WHERE chat_id=?", (chat_id,)).fetchone()[0]
+
     def channel(self, chat_id: int):
         return self.c.execute("SELECT * FROM channels WHERE chat_id=?", (chat_id,)).fetchone()
 

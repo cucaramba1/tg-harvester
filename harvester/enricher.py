@@ -38,7 +38,12 @@ def ocr_image(path: Path) -> str:
 async def _ffmpeg(*args: str) -> None:
     proc = await asyncio.create_subprocess_exec("ffmpeg", "-y", "-loglevel", "error", *args,
                                                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-    _, err = await asyncio.wait_for(proc.communicate(), 600)
+    try:
+        _, err = await asyncio.wait_for(proc.communicate(), 600)
+    finally:
+        if proc.returncode is None:  # таймаут или отмена: ffmpeg-сирота жрал CPU и писал в удалённый tmp
+            proc.kill()
+            await proc.wait()
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg: {err.decode(errors='ignore')[-300:]}")
 

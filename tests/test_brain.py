@@ -90,6 +90,18 @@ def test_usage_limit_switches_to_router_without_goals(s, db):
     assert "СЕКРЕТНАЯ ЦЕЛЬ" not in router.calls[0][0]
 
 
+
+def test_router_failure_after_limit_fallback_never_penalizes_posts(s, db):
+    import dataclasses
+    setup_vault(s)
+    a = cand(db, 1)
+    claude = FakeClaude([BrainError("claude: You've hit your usage limit")])
+    router = FakeClaude([BrainError("роутер недоступен: Connection refused")])
+    s2 = dataclasses.replace(s, router_fallback=True)
+    rep = asyncio.run(run_night(s2, db, claude=claude, router=router))
+    assert rep["tail_error"] and len(router.calls) == 1
+    assert (db.get_post(a)["status"], db.get_post(a)["attempts"]) == ("candidate", 0)
+
 def test_missing_claude_binary_aborts_night(s, db):
     setup_vault(s)
     a = cand(db, 1)

@@ -53,7 +53,7 @@ def tools(speech="голос", ocr="надпись", loud=-20.0, foreign=False, 
         return ocr
 
     return dict(extract=extract, stt=stt, ocr=ocr_fn, loudness=lambda p: loud, foreign_whisper=lambda: foreign,
-                disk=lambda: 100.0), calls
+                disk=lambda: 100.0, mem_free=lambda: 100.0), calls  # без подмены тесты читали память живого мака
 
 
 def merged(*groups, unclear=()):
@@ -137,7 +137,7 @@ def test_low_free_memory_stops_checks_before_any_download(tmp_path, db):
     s, ids, tid = make_world(tmp_path, db, [1, 2])
     t, calls = tools()
     tg = FakeTg()
-    out = asyncio.run(run_topic_checks(s, db, tg, FakeClaude([]), now=NIGHT, mem_free=lambda: 10.0, **t))
+    out = asyncio.run(run_topic_checks(s, db, tg, FakeClaude([]), now=NIGHT, **{**t, "mem_free": lambda: 10.0}))
     assert tg.downloaded == [] and out["skipped"] == "память" and db.topic_state_of("шея") == "check"
 
 
@@ -147,6 +147,6 @@ def test_memory_is_rechecked_between_files(tmp_path, db):
     tg = FakeTg()
     levels = iter([60.0, 60.0, 5.0])                       # на третьем ролике памяти уже не хватает
     router = FakeClaude([])
-    out = asyncio.run(run_topic_checks(s, db, tg, router, now=NIGHT, mem_free=lambda: next(levels), **t))
+    out = asyncio.run(run_topic_checks(s, db, tg, router, now=NIGHT, **{**t, "mem_free": lambda: next(levels)}))
     assert len(tg.downloaded) == 2 and out["skipped"] == "память"
     assert db.topic_state_of("шея") == "check"             # тема не склеена, остаток проверим в следующий раз

@@ -36,7 +36,14 @@ async def _run_match() -> None:
     """Матчинг отдельным процессом (`harvester match`): модель не висит в памяти live между запусками."""
     proc = await asyncio.create_subprocess_exec(sys.executable, "-m", "harvester", "match",
                                                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-    if await proc.wait():
+    try:
+        code = await asyncio.wait_for(proc.wait(), 1800)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        log.error("harvester match висел больше 30 минут, убит")
+        return
+    if code:
         log.error("harvester match завершился с кодом %s, см. logs/harvester-match.log", proc.returncode)
 
 
@@ -146,7 +153,17 @@ async def run_live(s: Settings) -> None:
     log.info("TG Harvester запущен")
     await asyncio.gather(_collect(col), _process(db, Enricher(s, db, tg)),
                          _topics_prep(s, db, tg), _topic_checks(s, db, tg),
-                         _tick(app, bot), _rss_guard(), dp.start_polling(bot, handle_signals=False))
+                         _tick(app, bot), _rss_guard(), dp.start_polling(bot, handle_signals=False),
+                         _exit_on_disconnect(client))
+
+
+async def _exit_on_disconnect(client) -> None:
+    """Telethon исчерпал переподключения: без выхода live жил зомби и ничего не собирал. launchd (KeepAlive) поднимет заново,
+    а init() доберёт пропущенное."""
+    await client.disconnected
+    log.error("Telethon отключился насовсем, выхожу для перезапуска")
+    logging.shutdown()
+    os._exit(75)
 
 
 async def run_bot(s: Settings) -> None:

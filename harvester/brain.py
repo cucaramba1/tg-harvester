@@ -293,7 +293,7 @@ async def run_night(s: Settings, db: DB, claude=run_claude, router=run_router) -
                     raw = await claude(s, prompt, **kw)
                 break
             except BrainError as e:
-                if in_tail:  # хвост это бонус: сбой роутера не должен ни штрафовать посты, ни тянуть остальные батчи
+                if in_tail or on_router:  # роутер (хвост или замена при лимите) упал: без штрафа постам, ночь дальше не тянем
                     rep["tail_error"] = str(e)[:200]
                     break
                 if is_limit(e) and s.router_fallback and not on_router:
@@ -309,7 +309,7 @@ async def run_night(s: Settings, db: DB, claude=run_claude, router=run_router) -
         for p in batch:
             v = verdicts.get(p["id"])
             if v is None:
-                if in_tail:
+                if in_tail or on_router:
                     continue  # бесплатная модель могла промолчать: пост остаётся в очереди для Claude без штрафа
                 if db.bump_attempts(p["id"]) >= 3:
                     db.update_post(p["id"], status="error", reason="claude: нет ответа по посту")

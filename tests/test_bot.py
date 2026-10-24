@@ -85,7 +85,16 @@ def test_ok_writes_then_rollback_restores(s, db):
 def test_ok_on_missing_note_reports_error(s, db):
     did = make_draft(db, 1, "append", "ИИ работа/Нет.md")
     text, kb = app_at(s, db).handle_callback(f"ok:{did}")
-    assert "⚠️ Не записал" in text and kb is None
+    assert "⚠️ Не записал" in text and cbs(kb)[0] == f"ok:{did}"  # кнопки остаются: сменить цель или отклонить
+
+
+def test_second_ok_tap_does_not_overwrite_written_card(s, db):
+    note(s)
+    did = make_draft(db, 1, "append", REL)
+    app = app_at(s, db)
+    text, kb = app.handle_callback(f"ok:{did}")
+    assert text and "✅ Записано" in text
+    assert app.handle_callback(f"ok:{did}") == (None, None)
 
 
 def test_no_rejects_draft_and_post(s, db):

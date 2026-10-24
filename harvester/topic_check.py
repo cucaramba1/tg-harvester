@@ -29,18 +29,20 @@ MERGE_SCHEMA = {"groups": [{"title": "строка", "note": "строка", "po
 def mean_volume(path: Path) -> float | None:
     """Средняя громкость дорожки в dB, None если звука нет совсем."""
     has = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_name",
-                          "-of", "csv=p=0", str(path)], capture_output=True, text=True).stdout.strip()
+                          "-of", "csv=p=0", str(path)], capture_output=True, text=True, timeout=120).stdout.strip()
     if not has:
         return None
     err = subprocess.run(["ffmpeg", "-i", str(path), "-af", "volumedetect", "-vn", "-f", "null", "-"],
-                         capture_output=True, text=True).stderr
+                         capture_output=True, text=True, timeout=600).stderr  # битый файл не вешает проверку тем
     m = re.search(r"mean_volume: (-?[\d.]+) dB", err)
     return float(m.group(1)) if m else None
 
 
 def foreign_whisper() -> bool:
     """Чужой mlx_whisper уже грузит память: свою расшифровку отложим. Вызывается, пока наша не запущена."""
-    return subprocess.run(["pgrep", "-f", "mlx_whisper"], capture_output=True).returncode == 0
+    # pgrep -f в этой среде процессы не видит (см. ~/Claude Code/CLAUDE.md), поэтому ps
+    out = subprocess.run(["ps", "-axo", "args="], capture_output=True, text=True, timeout=20).stdout
+    return "mlx_whisper" in out
 
 
 def mem_free_pct() -> float:
@@ -144,9 +146,9 @@ async def run_topic_checks(s: Settings, db: DB, tg, router, *, now=datetime.now,
             if disk() < s.min_free_gb:
                 db.push_alert(f"💾 На диске меньше {s.min_free_gb:g} GB: проверку тем остановил")
                 return {**rep, "skipped": "диск"}
-            if foreign_whisper():
+            if await asyncio.to_thread(foreign_whisper):  # ps и memory_pressure до 20 с: не держим event loop
                 return {**rep, "skipped": "чужой Whisper"}
-            if mem_free() < s.topic_min_free_mem_pct:  # 8 ГБ: Whisper рядом с VS Code и Claude Code загоняет мак в своп
+            if await asyncio.to_thread(mem_free) < s.topic_min_free_mem_pct:  # 8 ГБ: Whisper рядом с VS Code и Claude Code загоняет мак в своп
                 return {**rep, "skipped": "память"}
             await _check_file(s, db, tg, g[0], extract=extract, stt=stt, ocr=ocr, loudness=loudness)
             used += 1

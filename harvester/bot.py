@@ -65,6 +65,8 @@ class App:
     def _video_batch(self, n: int) -> list:
         """Сначала калибровка (каналы, где мало ответов), остаток слотов лучшие по похожести, как раньше.
         При вопросах по темам по одному спрашиваем только посты мелких тем, посты без темы ждут разметки."""
+        if n <= 0:
+            return []  # почти всегда так: не гоняем тяжёлые выборки по очереди каждую минуту
         by_topic = self.s.video_by_topic
         pool = self.db.unmanaged_video_asks(10**6, self.s.topic_min_size) if by_topic else None
         allowed = {p["id"] for p in pool} if pool is not None else None
@@ -85,7 +87,8 @@ class App:
             if left <= 0:
                 break
             too_big = r["n"] > self.s.topic_max_size and self.db.kv_get(f"split_giveup:{r['topic']}") != "1"
-            if r["n"] < self.s.topic_min_size or too_big or self.db.topic_state_of(r["topic"]) is not None:
+            # state 'new' = карточку не смогли отправить (сеть, 429): пробуем снова, а не бросаем тему навсегда
+            if r["n"] < self.s.topic_min_size or too_big or self.db.topic_state_of(r["topic"]) not in (None, "new"):
                 continue
             tid = self.db.ensure_topic_state(r["topic"])
             samples = [p["text"] for p in self.db.topic_queue(r["topic"])[:3]]
@@ -275,11 +278,13 @@ class App:
         d = self.db.get_draft(did)
         if d is None:
             return "Черновик не найден", None
-        text, _ = self._card(d)
+        if d["status"] not in ("drafted", "sent"):
+            return None, None  # второй тап по ✅: не затираем «Записано» и кнопку отката
+        text, kb = self._card(d)
         try:
             bid = self.writer.apply(did)
         except WriteError as e:
-            return f"{text}\n\n⚠️ Не записал: {e}", None
+            return f"{text}\n\n⚠️ Не записал: {e}", kb  # кнопки остаются: можно сменить цель или отклонить
         b = self.db.get_block(bid)
         return f"{text}\n\n✅ Записано в [[{PurePosixPath(b['path']).stem}]]", written_kb(bid)
 

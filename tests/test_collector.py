@@ -127,3 +127,12 @@ def test_live_message_is_stored_with_source_live(s, db):
     asyncio.run(c.on_new(SimpleNamespace(chat_id=CHAT_A, message=msg(50, d(2026, 10, 10), "живой", kind="photo"))))
     row = db.c.execute("SELECT * FROM posts").fetchone()
     assert (row["msg_id"], row["source"], json.loads(row["media"])[0]["kind"]) == (50, "live", "photo")
+
+
+def test_restart_catches_up_posts_missed_while_down(s, db):
+    tg = FakeTg({CHAT_A: list(A), CHAT_B: list(B)}, {CHAT_A: 5, CHAT_B: 2})
+    run_all(Collector(s, db, tg))
+    assert all(db.channel(c)["phase"] == "done" for c in (CHAT_A, CHAT_B))
+    tg.msgs[CHAT_A].append(msg(9, d(2026, 9, 4), "вышел, пока live лежал"))  # события в это время не приходили
+    run_all(Collector(s, db, tg))
+    assert ids(db, CHAT_A)[-1] == 9 and db.channel(CHAT_A)["phase"] == "done"
