@@ -139,13 +139,51 @@ def classify(m: Match, note_t: float, section_t: float, sections: set[str]) -> t
     return "none", None
 
 
+DUP_MIN_CHARS = 80  # короткие подписи («🔥», «смотрите») похожи на всё подряд, их не склеиваем
+
+
+class DupIndex:
+    """Дубли кандидатов (репост, одна новость из разных каналов, повтор рекламы) до ночного claude -p.
+    Идея из NyanNyanovich/nyan (clusterer.py), без кластеризации: первый в очереди остаётся, похожие уходят в duplicate."""
+
+    def __init__(self, threshold: float, rows=()):
+        self.t = threshold
+        self.ids: list[int] = []
+        self.m: np.ndarray | None = None  # буфер с запасом: vstack на каждый пост при 10k очереди копировал бы гигабайты
+        for r in rows:
+            self.add(r["id"], np.frombuffer(r["emb"], dtype=np.float32))
+
+    def find(self, vec: np.ndarray) -> int | None:
+        if not self.ids:
+            return None
+        sims = self.m[: len(self.ids)] @ vec
+        i = int(np.argmax(sims))
+        return self.ids[i] if sims[i] >= self.t else None
+
+    def add(self, pid: int, vec: np.ndarray) -> None:
+        n = len(self.ids)
+        if self.m is None:
+            self.m = np.empty((256, vec.shape[0]), dtype=np.float32)
+        elif n == len(self.m):
+            self.m = np.concatenate([self.m, np.empty_like(self.m)])
+        self.m[n] = vec
+        self.ids.append(pid)
+
+
+def mark_duplicate(s: Settings, db: DB, pid: int, of: int) -> None:
+    db.update_post(pid, status="duplicate", reason=f"дубль #{of}")
+    drop_keep(s, pid)
+
+
 class Matcher:
-    def __init__(self, s: Settings, db: DB, vectors: VaultVectors):
+    def __init__(self, s: Settings, db: DB, vectors: VaultVectors, dups: DupIndex | None = None):
         self.s, self.db, self.v = s, db, vectors
+        self.dups = dups if dups is not None else DupIndex(s.dup_threshold, db.dup_pool())
 
     def process(self, post) -> str:
         text = "\n".join(x for x in (post["text"], post["extra_text"]) if x).strip()
-        m = self.v.match(self.v.embedder.embed([text[:2000]])[0])
+        vec = _norm(self.v.embedder.embed([text[:2000]])[0])
+        m = self.v.match(vec)
         mode, target = classify(m, self.s.note_threshold, self.s.section_threshold, set(self.v.sections))
         has_video = any(x["kind"] == "video" for x in json.loads(post["media"]))
         if mode == "none":
@@ -158,6 +196,14 @@ class Matcher:
                       usefulness=usefulness(text), mode=None if mode == "none" else mode, target=target)
         if status == "video_ask":
             fields["video_state"] = "ask"
+        if status == "candidate" and len(text) >= DUP_MIN_CHARS:
+            of = self.dups.find(vec)
+            if of is not None:
+                self.db.update_post(post["id"], **fields)
+                mark_duplicate(self.s, self.db, post["id"], of)
+                return "duplicate"
+            fields["emb"] = vec.astype(np.float32).tobytes()
+            self.dups.add(post["id"], vec)
         self.db.update_post(post["id"], **fields)
         if status == "explore":
             drop_keep(self.s, post["id"])  # вне тем картинки не храним, иначе диск забьют мемы

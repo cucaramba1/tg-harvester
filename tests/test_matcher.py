@@ -128,3 +128,26 @@ def test_calibrate_writes_json_and_updates_settings(s, db):
     assert res == {"note_threshold": 0.8, "section_threshold": 0.7}
     assert json.loads(s.calibration_path.read_text("utf-8")) == res
     assert s.note_threshold == 0.8
+
+
+def test_duplicate_candidates_are_marked_not_sent_to_night(s, db):
+    from harvester.matcher import DupIndex
+    v = VaultVectors(s, FakeEmbedder())
+    vault(s)
+    v.refresh()
+    m = Matcher(s, db, v)
+    long = "промпт для claude: " + "как написать промпт для claude, чтобы ответ был точнее и короче. " * 2
+    a = _post(db, 1, long)
+    b = _post(db, 2, long + " Репост из другого канала.")
+    short = _post(db, 3, "промпт claude")  # короткое не склеиваем
+    short2 = _post(db, 4, "промпт claude")
+    assert m.process(a) == "candidate" and db.get_post(a["id"])["emb"] is not None
+    assert m.process(b) == "duplicate" and db.get_post(b["id"])["reason"] == f"дубль #{a['id']}"
+    assert m.process(short) == "candidate" and m.process(short2) == "candidate"
+    # перезапуск match: индекс собирается из базы, дубль ловится и без живого процесса
+    c = _post(db, 5, long)
+    assert Matcher(s, db, v).process(c) == "duplicate"
+    idx = DupIndex(0.9)
+    for i in range(600):  # буфер растёт без потери векторов
+        idx.add(i, np.eye(600, dtype=np.float32)[i])
+    assert idx.find(np.eye(600, dtype=np.float32)[599]) == 599

@@ -34,7 +34,7 @@ async def _login(s) -> None:
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     p = argparse.ArgumentParser(prog="harvester")
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("login", "live", "bot", "night", "audit", "calibrate", "match"):
+    for name in ("login", "live", "bot", "night", "audit", "calibrate", "match", "dedup"):
         sub.add_parser(name)
     av = sub.add_parser("autovideo")
     av.add_argument("action", choices=["backfill", "report"])
@@ -100,6 +100,31 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
             except Exception:
                 logging.exception("match %s", p["id"])
         print(f"Сопоставлено постов: {n}")
+    elif a.cmd == "dedup":
+        # Разово по накопленной очереди (новые посты проверяет match). Модель живёт только в этом процессе.
+        from .db import DB
+        from .matcher import DUP_MIN_CHARS, DupIndex, FastEmbedder, mark_duplicate
+        db = DB(s.db_path)
+        emb = FastEmbedder(s.embed_model, s.models_dir)
+        idx = DupIndex(s.dup_threshold, db.dup_pool())
+        known = set(idx.ids)
+        # сначала уже разобранное (оригиналы), потом очередь в порядке ночи: дублем становится тот, что ниже
+        rows = db.c.execute("SELECT * FROM posts WHERE emb IS NULL AND status IN ('drafted','written')").fetchall()
+        rows += [r for r in db.night_queue(0) if r["status"] == "candidate"]
+        body = lambda r: "\n".join(x for x in (r["text"], r["extra_text"]) if x).strip()
+        rows = [r for r in rows if r["id"] not in known and len(body(r)) >= DUP_MIN_CHARS]
+        dup = 0
+        for i in range(0, len(rows), 64):
+            part = rows[i:i + 64]
+            for r, v in zip(part, emb.embed([body(r)[:2000] for r in part])):
+                of = idx.find(v) if r["status"] == "candidate" else None
+                if of is not None:
+                    mark_duplicate(s, db, r["id"], of)
+                    dup += 1
+                else:
+                    db.update_post(r["id"], emb=v.astype("float32").tobytes())
+                    idx.add(r["id"], v)
+        print(f"Проверено {len(rows)}, дублей {dup}")
     elif a.cmd == "calibrate":
         from .db import DB
         from .matcher import calibrate

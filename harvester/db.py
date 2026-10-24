@@ -128,6 +128,8 @@ class DB:
         for col, ddl in (("reason", "TEXT"), ("source", "TEXT NOT NULL DEFAULT 'import'"), ("ts", "TEXT")):
             if col not in have:
                 self.c.execute(f"ALTER TABLE labels ADD COLUMN {col} {ddl}")
+        if "emb" not in {r["name"] for r in self.c.execute("PRAGMA table_info(posts)")}:
+            self.c.execute("ALTER TABLE posts ADD COLUMN emb BLOB")  # вектор кандидата для поиска дублей
 
     def _update(self, table: str, key: str, kval, fields: dict) -> None:
         if not fields:
@@ -182,6 +184,11 @@ class DB:
 
     def update_post(self, pid: int, **fields) -> None:
         self._update("posts", "id", pid, fields)
+
+    def dup_pool(self) -> list:
+        """Посты с вектором, против которых ищем дубли: в очереди, разобранные и отклонённые."""
+        return self.c.execute("SELECT id, emb FROM posts WHERE emb IS NOT NULL AND status IN "
+                              "('candidate','drafted','written','rejected')").fetchall()
 
     def bump_attempts(self, pid: int) -> int:
         self.c.execute("UPDATE posts SET attempts=attempts+1 WHERE id=?", (pid,))
