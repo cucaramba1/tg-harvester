@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 
 
 VIDEO_SUFFIXES = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
+DISKCAP_FLAG = Path.home() / "Claude Code/tools/resource-guard/state/diskcap-tg-harvester"
 
 
 def dir_gb(path: Path) -> float:
@@ -76,6 +77,8 @@ class Enricher:
             return "new"
 
     def _disk_ok(self) -> bool:
+        if DISKCAP_FLAG.exists():  # сторож: data/ бота выше DISK_CAPS (tools/resource-guard)
+            return self._alert_once("diskcap_alert", "🗂 Данные бота выше лимита сторожа: медиа пропускаю, текст обрабатываю")
         if dir_gb(self.s.keep_dir) >= self.s.max_keep_gb:
             return self._alert_once("keep_alert", f"🗂 Папка медиа дошла до {self.s.max_keep_gb:g} GB: медиа пропускаю, текст обрабатываю")
         if self.disk() >= self.s.min_free_gb:

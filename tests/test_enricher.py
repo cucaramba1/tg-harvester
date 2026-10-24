@@ -145,3 +145,14 @@ def test_media_skipped_when_keep_dir_over_limit(s, db):
     assert asyncio.run(enr(s2, db, tg).process(p)) == "enriched"
     assert tg.calls == [] and json.loads(db.get_post(p["id"])["images"]) == []
     assert any("медиа" in a["text"] for a in db.c.execute("select text from alerts").fetchall())
+
+
+def test_guard_diskcap_flag_skips_media_keeps_text(s, db, tmp_path, monkeypatch):
+    from harvester import enricher
+    flag = tmp_path / "diskcap-tg-harvester"
+    flag.touch()
+    monkeypatch.setattr(enricher, "DISKCAP_FLAG", flag)
+    tg = FakeTg()
+    p = post(db, 6, "Длинный пост про промпты для нейросетей и картинка к нему", "photo")
+    assert asyncio.run(enr(s, db, tg, disk=lambda: 100.0).process(p)) == "enriched"
+    assert tg.calls == [] and any("лимита сторожа" in t for t in db.pop_alerts())
