@@ -4,6 +4,7 @@ WAL и busy_timeout: live-процесс и ночной процесс пишу
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -197,7 +198,21 @@ class DB:
     def counts(self) -> dict[str, int]:
         return {r[0]: r[1] for r in self.c.execute("SELECT status, COUNT(*) FROM posts GROUP BY status")}
 
-    def night_queue(self, explore_quota: int, section_cap: int = 0) -> list:
+    def explore_by_keywords(self, keywords, limit: int) -> list:
+        """Посты вне тем, где есть слова из целей Некита (FTS5, слово по префиксу, порядок bm25; идея teledigest).
+        Индекс временный, на одну ночь: без триггеров нечему рассинхронизироваться."""
+        terms = [re.sub(r"[^\w ]", " ", k.lower()).strip() for k in keywords]
+        q = " OR ".join(f'"{t}"*' if " " not in t else f'"{t}"' for t in terms if t)
+        if not q or limit <= 0:
+            return []
+        self.c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS temp.ex USING fts5(pid UNINDEXED, body)")
+        self.c.execute("DELETE FROM temp.ex")
+        self.c.execute("INSERT INTO temp.ex SELECT id, COALESCE(text, '') || ' ' || COALESCE(extra_text, '') "
+                       "FROM posts WHERE status='explore'")
+        return self.c.execute("SELECT p.* FROM temp.ex JOIN posts p ON p.id=ex.pid WHERE ex MATCH ? "
+                              "ORDER BY bm25(ex), p.usefulness DESC LIMIT ?", (q, limit)).fetchall()
+
+    def night_queue(self, explore_quota: int, section_cap: int = 0, keywords=()) -> list:
         """Кандидаты: свежие live первыми, дальше похожесть плюс охват (у сюжета есть дубли из других каналов,
         +0.03 за каждый, до трёх; идея nyan ranker.py). section_cap: не больше N постов одного раздела за ночь,
         остальные ждут следующей, иначе «ИИ работа» съедала почти весь лимит."""
@@ -214,8 +229,10 @@ class DB:
                 if per[sec] <= section_cap:
                     kept.append(r)
             cand = kept
-        expl = self.c.execute("SELECT * FROM posts WHERE status='explore' ORDER BY usefulness DESC, id LIMIT ?",
-                              (explore_quota,)).fetchall()
+        expl = list(self.explore_by_keywords(keywords, explore_quota)) if keywords else []
+        seen = {r["id"] for r in expl}
+        expl += [r for r in self.c.execute("SELECT * FROM posts WHERE status='explore' ORDER BY usefulness DESC, id LIMIT ?",
+                                           (explore_quota,)) if r["id"] not in seen][: explore_quota - len(expl)]
         return list(cand) + list(expl)
 
     def pilot_sample(self, n: int) -> list:

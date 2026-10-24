@@ -87,6 +87,7 @@ class Settings:
     video_auto: str = "off"
     video_auto_conf: float = 0.9
     video_auto_min_n: int = 8
+    explore_keywords: tuple = ()  # посты вне тем с этими словами идут в ночь первыми
     night_section_cap: int = 60  # постов одного раздела за ночь (0 = без потолка)
     dup_threshold: float = 0.90  # cosine для дублей кандидатов (замер tools/tg-harvester/bench/dup_threshold.py)
 
@@ -212,5 +213,6 @@ def load_settings(root: Path | None = None) -> Settings:
         video_auto_min_n=int(cfg.get("video_auto_min_n", 8)),
         dup_threshold=float(cfg.get("dup_threshold", 0.90)),
         night_section_cap=int(cfg.get("night_section_cap", 60)),
+        explore_keywords=tuple(cfg.get("explore_keywords") or ()),
         video_calib_channels=tuple(int(x) for x in cfg.get("video_calib_channels") or ()),
     )

@@ -259,7 +259,7 @@ def build_prompt(posts: list, sections: list[str], goals: str, channel_name, ima
 async def run_night(s: Settings, db: DB, claude=run_claude, router=run_router) -> dict:
     retro = db.retro_active()
     limit = int(s.max_calls_per_night * (s.retro_multiplier if retro else 1))
-    queue = db.night_queue(s.explore_quota, s.night_section_cap)
+    queue = db.night_queue(s.explore_quota, s.night_section_cap, s.explore_keywords)
     sections = list_sections(s.vaults)
     goals_p = s.vault / s.goals_note
     goals = goals_p.read_text("utf-8")[:3000] if goals_p.exists() else ""

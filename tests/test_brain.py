@@ -293,3 +293,12 @@ def test_night_queue_boosts_coverage_and_caps_sections(s, db):
     assert order == [c, a, b]
     capped = [r["id"] for r in db.night_queue(0, section_cap=1)]
     assert capped == [c, a]  # из раздела REL за ночь только один, «b» ждёт
+
+
+def test_explore_keywords_go_first(s, db):
+    plain = cand(db, 1, status="explore", usefulness=0.9)
+    hit = cand(db, 2, status="explore", usefulness=0.1)
+    db.update_post(hit, text="Аренда квартиры в Нячанге на месяц")
+    assert [r["id"] for r in db.night_queue(2, keywords=("нячанг",))] == [hit, plain]
+    assert [r["id"] for r in db.night_queue(1, keywords=("нячанг",))] == [hit]
+    assert [r["id"] for r in db.night_queue(1)] == [plain]
