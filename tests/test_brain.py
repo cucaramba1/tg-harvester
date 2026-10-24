@@ -267,3 +267,15 @@ def test_run_router_raises_brain_error_when_all_models_fail(s, monkeypatch):
                         lambda rq, timeout=0: (_ for _ in ()).throw(urllib.error.HTTPError(rq.full_url, 502, "x", {}, None)))
     with pytest.raises(BrainError, match="роутер недоступен"):
         asyncio.run(brain.run_router(s, "p", system="s", timeout=5))
+
+
+def test_is_limit_matches_real_messages_only():
+    from harvester.brain import is_limit
+    real = ["claude: You've hit your session limit · resets 8:10pm (Asia/Saigon)",
+            "claude: You've hit your weekly limit · resets Oct 21 at 1pm (Asia/Saigon)",
+            "claude: You've hit your usage limit", "usage limit reached", "you have reached your weekly usage limit",
+            "usage credit limit reached", "Fable limit reached", "не смог запустить claude: No such file"]
+    noise = ["claude: Context limit reached", "claude exit 1: Usage: claude [options] [command]",
+             "claude не ответил за 600 с", "claude вернул не JSON", "claude: rate limited, overloaded"]
+    assert all(is_limit(Exception(t)) for t in real)
+    assert not any(is_limit(Exception(t)) for t in noise)

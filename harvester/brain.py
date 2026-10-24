@@ -173,10 +173,16 @@ def demote(md: str) -> str:
     return re.sub(r"(?m)^#{1,2} ", "### ", md)
 
 
+# Формулировки из логов (You've hit your session/weekly limit · resets ...) и из бинаря claude 25.10.2026
+_LIMIT = re.compile(r"hit your \w+ limit|limit reached|reached your \w+ (usage )?limit|out of extra usage|лимит|не смог запустить")
+
+
 def is_limit(e: Exception) -> bool:
     """Лимит подписки или claude вообще не запускается: ночь обрывается, посты ждут без штрафа."""
     t = str(e).lower()
-    return any(w in t for w in ("limit", "лимит", "usage", "не смог запустить"))
+    if "context limit" in t or "usage:" in t:  # переполнен контекст / справка CLI при кривых флагах: это не лимит подписки
+        return False
+    return bool(_LIMIT.search(t))
 
 
 def _safe_note(vault: Path, rel: str | None) -> bool:
