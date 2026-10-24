@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import PurePosixPath
 
 from aiogram.types import InlineKeyboardButton as B
@@ -13,6 +14,41 @@ PHASES = {"new": "новое", "retro": "ретро", "done": "готово"}
 
 def _trim(t: str, n: int = MAX) -> str:
     return t if len(t) <= n else t[: n - 1] + "…"
+
+
+def _trim_sentence(t: str, n: int) -> str:
+    """Длинный черновик режем по концу предложения или абзаца, а не посреди слова (идея Telebrief);
+    в заметку всё равно уйдёт полный текст."""
+    if len(t) <= n:
+        return t
+    tail = " … (полностью в заметке)"
+    cut = t[: n - len(tail)]
+    ends = [m.end() for m in re.finditer(r"[.!?…](\s|$)|\n", cut)]
+    if ends and ends[-1] > len(cut) * 0.6:
+        cut = cut[: ends[-1]]
+    return cut.rstrip() + tail
+
+
+# цифры (с пробелами-разделителями), ссылки, @ники и латинские слова: то, что модель чаще всего выдумывает
+_FACT = re.compile(r"https?://\S+|@\w{3,}|\d+(?:[ .,]\d+)*%?|\b[A-Za-z][A-Za-z0-9.+-]{2,}\b")
+# служебное из markdown и кода плюс контекст Некита, который подмешивается из целей, а не из поста
+_FACT_SKIP = {"text", "url", "bash", "python", "json", "markdown", "http", "https", "open", "source", "mini-app",
+              "cucaramba", "telegram", "obsidian", "claude"}
+
+
+def unverified(content: str, source: str) -> list[str]:
+    """Факты из черновика, которых нет в исходном посте (вместо гейта nyan ads.py: у нас пересказ, а не чистка)."""
+    src = re.sub(r"\s", "", source.lower())
+    body = re.sub(r"(?s)```.*?```|`[^`]*`|\[\[[^\]]*\]\]", " ", content)  # код, команды и [[ссылки на заметки]] не факты поста
+    body = re.sub(r"(?m)^\s*\d+[.)]\s", " ", body)  # нумерация списка
+    out = []
+    for m in _FACT.finditer(body):
+        tok = m.group(0).rstrip(".,")
+        key = re.sub(r"\s", "", tok.lower())
+        if len(key) < 2 or key in _FACT_SKIP or key in src or tok in out:
+            continue
+        out.append(tok)
+    return out
 
 
 def _stem(rel: str) -> str:
@@ -31,8 +67,12 @@ def where(mode: str, target: str, title: str | None = None) -> str:
 
 
 def draft_card(d, post, channel: str, link: str) -> str:
-    return _with_footer(f"{where(d['mode'], d['target'], d['title'])}\n\n{d['content']}",
-                        f"📌 {channel} · {post['date'][:10]}", link)
+    footer = f"📌 {channel} · {post['date'][:10]}"
+    new = unverified(d["content"] or "", f"{post['text'] or ''}\n{post['extra_text'] or ''}")
+    if new:
+        footer = f"⚠ проверь, в посте этого нет: {_trim(', '.join(new[:6]), 200)}\n{footer}"
+    head = f"{where(d['mode'], d['target'], d['title'])}\n\n"
+    return f"{head}{_trim_sentence(d['content'] or '', MAX - len(head) - len(footer) - len(link) - 8)}\n\n{footer}\n{link}"
 
 
 def draft_kb(did: int, link: str) -> K:
