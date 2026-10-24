@@ -197,9 +197,23 @@ class DB:
     def counts(self) -> dict[str, int]:
         return {r[0]: r[1] for r in self.c.execute("SELECT status, COUNT(*) FROM posts GROUP BY status")}
 
-    def night_queue(self, explore_quota: int) -> list:
+    def night_queue(self, explore_quota: int, section_cap: int = 0) -> list:
+        """Кандидаты: свежие live первыми, дальше похожесть плюс охват (у сюжета есть дубли из других каналов,
+        +0.03 за каждый, до трёх; идея nyan ranker.py). section_cap: не больше N постов одного раздела за ночь,
+        остальные ждут следующей, иначе «ИИ работа» съедала почти весь лимит."""
         cand = self.c.execute(
-            "SELECT * FROM posts WHERE status='candidate' ORDER BY (source='live') DESC, score DESC, id").fetchall()
+            "SELECT p.*, COALESCE(d.n, 0) AS dups FROM posts p LEFT JOIN "
+            "(SELECT reason, COUNT(*) AS n FROM posts WHERE status='duplicate' GROUP BY reason) d ON d.reason='дубль #' || p.id "
+            "WHERE p.status='candidate' ORDER BY (p.source='live') DESC, p.score + 0.03 * MIN(3, COALESCE(d.n, 0)) DESC, p.id").fetchall()
+        if section_cap:
+            per: dict[str, int] = {}
+            kept = []
+            for r in cand:
+                sec = (r["target"] or "").split("/")[0]
+                per[sec] = per.get(sec, 0) + 1
+                if per[sec] <= section_cap:
+                    kept.append(r)
+            cand = kept
         expl = self.c.execute("SELECT * FROM posts WHERE status='explore' ORDER BY usefulness DESC, id LIMIT ?",
                               (explore_quota,)).fetchall()
         return list(cand) + list(expl)

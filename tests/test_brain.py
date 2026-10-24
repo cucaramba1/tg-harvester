@@ -279,3 +279,17 @@ def test_is_limit_matches_real_messages_only():
              "claude не ответил за 600 с", "claude вернул не JSON", "claude: rate limited, overloaded"]
     assert all(is_limit(Exception(t)) for t in real)
     assert not any(is_limit(Exception(t)) for t in noise)
+
+
+def test_night_queue_boosts_coverage_and_caps_sections(s, db):
+    a = cand(db, 1, score=0.70)
+    b = cand(db, 2, score=0.72)
+    for i in range(3, 6):  # у «a» три дубля из других каналов: сюжет шире, поднимается над «b»
+        d = cand(db, i, score=0.5)
+        db.update_post(d, status="duplicate", reason=f"дубль #{a}")
+    c = cand(db, 6, score=0.9)
+    db.update_post(c, target="Фитнес и здоровье/Бег.md")
+    order = [r["id"] for r in db.night_queue(0)]
+    assert order == [c, a, b]
+    capped = [r["id"] for r in db.night_queue(0, section_cap=1)]
+    assert capped == [c, a]  # из раздела REL за ночь только один, «b» ждёт

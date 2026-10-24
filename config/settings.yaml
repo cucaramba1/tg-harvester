@@ -35,6 +35,7 @@ video_calib_top: 6
 video_auto: off            # off | dry | on: автоответы по видео (правило в harvester/autovideo.py)
 video_auto_conf: 0.9
 video_auto_min_n: 8
+night_section_cap: 60      # не больше постов одного раздела за ночь: ночь берёт ~340, «ИИ работа» съедала почти всё
 dup_threshold: 0.90        # дубли кандидатов по cosine: замер 25.10, с 0.88 все пары оказались одним сюжетом, первая ошибка на 0.86
 video_by_topic: true       # видео-вопросы по темам: карточка на тему вместо вопроса по каждому видео
 topic_cards_per_day: 10    # карточек тем в день
