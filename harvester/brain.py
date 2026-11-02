@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from .config import Settings, as_roots, locate
+from .config import Settings, as_roots, locate, tool_path
 from .db import DB
 from .files import drop_keep, list_sections
 
@@ -63,7 +63,7 @@ async def run_claude(s: Settings, prompt: str, *, system: str, schema: dict | No
     if schema is not None:
         args += ["--json-schema", json.dumps(schema, ensure_ascii=False)]
     s.data_dir.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "PATH": f"{os.path.dirname(s.claude_bin)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
+    env = {**os.environ, "PATH": tool_path(os.path.dirname(s.claude_bin))}
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,

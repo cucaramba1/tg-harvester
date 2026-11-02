@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import shutil
+import sys
 import tempfile
 from datetime import date
 from pathlib import Path
@@ -31,6 +32,12 @@ def free_gb(path: Path = Path.home()) -> float:
 
 
 def ocr_image(path: Path) -> str:
+    if sys.platform != "darwin":
+        try:
+            from .ocr_windows import ocr_image as _ocr  # Windows.Media.Ocr; модуль пишется и проверяется на самой Windows
+        except ImportError as e:
+            raise RuntimeError(f"OCR для {sys.platform} не реализован: {e}")
+        return _ocr(path)
     from ocrmac import ocrmac
     res = ocrmac.OCR(str(path), language_preference=["ru-RU", "en-US"]).recognize()
     return "\n".join(text for text, conf, _box in res if conf >= 0.3).strip()

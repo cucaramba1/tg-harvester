@@ -7,7 +7,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from .config import Settings
+from .config import Settings, tool_path
 
 log = logging.getLogger(__name__)
 _lock = asyncio.Lock()  # две модели параллельно на 8 ГБ не запускаем
@@ -23,7 +23,7 @@ async def transcribe(s: Settings, audio: Path) -> str:
                 "--output-format", "txt", "--output-dir", out, "--verbose", "False",
                 "--condition-on-previous-text", "False", "--initial-prompt", PROMPT,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + os.environ.get("PATH", "")},
+                env={**os.environ, "PATH": tool_path() if os.name == "nt" else "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + os.environ.get("PATH", "")},
             )
             try:
                 _, err = await asyncio.wait_for(proc.communicate(), timeout=600)

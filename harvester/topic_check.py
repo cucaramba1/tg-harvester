@@ -6,9 +6,12 @@ import json
 import logging
 import re
 import subprocess
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+
+import psutil
 
 from .brain import BrainError
 from .config import Settings
@@ -39,17 +42,23 @@ def mean_volume(path: Path) -> float | None:
 
 
 def foreign_whisper() -> bool:
-    """Чужой mlx_whisper уже грузит память: свою расшифровку отложим. Вызывается, пока наша не запущена."""
-    # pgrep -f в этой среде процессы не видит (см. ~/Claude Code/CLAUDE.md), поэтому ps
-    out = subprocess.run(["ps", "-axo", "args="], capture_output=True, text=True, timeout=20).stdout
-    return "mlx_whisper" in out
+    """Чужой whisper (mlx_whisper на маке, whisper_cli на Windows) уже грузит память: свою расшифровку отложим.
+    Вызывается, пока наша не запущена. psutil вместо ps: работает и на Windows."""
+    for p in psutil.process_iter(["cmdline"]):
+        cmd = " ".join(p.info["cmdline"] or ())
+        if "mlx_whisper" in cmd or "whisper_cli" in cmd:
+            return True
+    return False
 
 
 def mem_free_pct() -> float:
-    """Свободная память системы в процентах (memory_pressure). При сбое чтения считаем, что памяти мало."""
+    """Свободная память системы в процентах. На маке memory_pressure (как раньше), иначе psutil.
+    При сбое чтения считаем, что памяти мало."""
     try:
-        out = subprocess.run(["memory_pressure"], capture_output=True, text=True, timeout=20).stdout
-        return float(re.search(r"free percentage: (\d+)%", out).group(1))
+        if sys.platform == "darwin":
+            out = subprocess.run(["memory_pressure"], capture_output=True, text=True, timeout=20).stdout
+            return float(re.search(r"free percentage: (\d+)%", out).group(1))
+        return float(psutil.virtual_memory().available * 100 // psutil.virtual_memory().total)
     except Exception:
         return 0.0
 

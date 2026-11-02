@@ -13,6 +13,13 @@ from dotenv import load_dotenv
 CALIBRATED = ("note_threshold", "section_threshold")
 
 
+def tool_path(*first: str) -> str:
+    """PATH для подпроцессов (claude, whisper): у launchd/Планировщика он почти пустой."""
+    if os.name == "nt":
+        return os.pathsep.join([*first, os.environ.get("PATH", "")])
+    return os.pathsep.join([*first, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"])
+
+
 @dataclass(frozen=True)
 class Channel:
     id: int
@@ -160,7 +167,7 @@ def load_settings(root: Path | None = None) -> Settings:
     return Settings(
         root=root,
         vault=Path(env("VAULT_DIR", str(home / "Documents/Obsidian storage"))),
-        extra_vaults=tuple(Path(x).expanduser() for x in env("EXTRA_VAULT_DIRS", str(home / "Documents/Obsidian Досуг")).split(":") if x),
+        extra_vaults=tuple(Path(x).expanduser() for x in env("EXTRA_VAULT_DIRS", str(home / "Documents/Obsidian Досуг")).split(os.pathsep) if x),
         bot_token=env("BOT_TOKEN"),
         owner_id=int(env("OWNER_ID") or 0),
         api_id=int(env("TG_API_ID") or 0),
