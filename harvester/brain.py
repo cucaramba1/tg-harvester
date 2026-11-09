@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -22,6 +23,13 @@ SYSTEM = """Ты отбираешь посты из Telegram-каналов дл
 
 Ценно: практическая польза потом. Гайд, инструкция, промпт, инструмент или сервис со ссылкой, схема заработка, цифры и выводы, рекомендация книги или курса, упражнение или полезная привычка.
 Не ценно: новости, мемы, реклама, мотивационные цитаты без сути, анонсы, розыгрыши. Для них mode skip.
+Досуг тоже ценен для Некита. Подборку фильмов, сериалов, аниме, книг или музыки с конкретными названиями (и оценками или описанием) бери как new в подходящий раздел досуга, а не skip. Skip для такой подборки только если в ней нет названий (одни призывы и реклама) или это анонс без содержания.
+Некит живёт во Вьетнаме, учится и строит свои ИИ-продукты. Поэтому:
+- Российские новости (цены, Росстат, налоги, мошенничество и законы в России, новости российских брендов вроде Яндекса, МТС, Авито, магазинов) это skip: для него неактуальны, часто скрытая реклама.
+- Новость про ИИ бери только если из неё можно что-то применить (инструмент, приём, настройка, цифры для решения). Просто новость, отчёт или курьёз про ИИ это skip.
+- Бытовые советы и лайфхаки (кухня, уборка, здоровье, образ жизни) бери, если совет конкретный и неочевидный. Банальность, общие слова и реклама это skip.
+- Базовые вещи, которые он давно знает (основы Excel и Google Sheets, общие слова про продуктивность), это skip. Бесплатные курсы, базы курсов и подборки по его темам бери.
+- Если пост про лекарство, товар или сервис, недоступный во Вьетнаме или России, или недорого не купить, это skip.
 
 mode:
 - append: дописать в существующую заметку. target: точный путь из «Похожие заметки» этого поста. Только если пост прямо по теме этой заметки.
@@ -256,6 +264,11 @@ def build_prompt(posts: list, sections: list[str], goals: str, channel_name, ima
     return "\n".join(parts)
 
 
+def prompt_version() -> str:
+    """Короткий хэш системного промпта: по нему видно, каким промптом сделан черновик."""
+    return hashlib.sha1(SYSTEM.encode("utf-8")).hexdigest()[:8]
+
+
 async def run_night(s: Settings, db: DB, claude=run_claude, router=run_router) -> dict:
     retro = db.retro_active()
     limit = int(s.max_calls_per_night * (s.retro_multiplier if retro else 1))
@@ -326,8 +339,9 @@ async def run_night(s: Settings, db: DB, claude=run_claude, router=run_router) -
                 drop_keep(s, p["id"])
                 rep["skipped"] += 1
             else:
+                model = f"router:{ROUTER_MODELS[0]}" if on_router else f"claude:{os.environ.get('CLAUDE_BATCH_MODEL', 'sonnet')}"
                 db.add_draft(p["id"], v.mode, v.target, v.title, v.content, v.keep_image,
-                             alternatives(p, sections, s.vaults))
+                             alternatives(p, sections, s.vaults), prompt_ver=prompt_version(), brain_model=model)
                 db.update_post(p["id"], status="drafted")
                 rep["drafted"] += 1
     if rep["aborted"]:

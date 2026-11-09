@@ -302,3 +302,24 @@ def test_explore_keywords_go_first(s, db):
     assert [r["id"] for r in db.night_queue(2, keywords=("нячанг",))] == [hit, plain]
     assert [r["id"] for r in db.night_queue(1, keywords=("нячанг",))] == [hit]
     assert [r["id"] for r in db.night_queue(1)] == [plain]
+
+
+def test_draft_records_prompt_version_and_model(s, db):
+    from harvester.brain import SYSTEM, prompt_version
+    setup_vault(s)
+    a = cand(db, 1)
+    night(s, db, FakeClaude([lambda p: answer(item(a))]))
+    d = db.drafts("drafted")[0]
+    assert d["prompt_ver"] == prompt_version() and len(d["prompt_ver"]) == 8
+    assert d["brain_model"].startswith("claude:")
+    assert prompt_version() == prompt_version() and SYSTEM  # стабильный хэш
+
+
+def test_router_draft_records_router_model(s, db):
+    import dataclasses
+    setup_vault(s)
+    a = cand(db, 1)
+    claude = FakeClaude([BrainError("claude: You've hit your usage limit")])
+    router = FakeClaude([lambda p: answer(item(a))])
+    asyncio.run(run_night(dataclasses.replace(s, router_fallback=True), db, claude=claude, router=router))
+    assert db.drafts("drafted")[0]["brain_model"].startswith("router:")

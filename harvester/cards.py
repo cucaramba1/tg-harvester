@@ -90,6 +90,14 @@ def alts_kb(did: int, alts: list) -> K:
     return K(inline_keyboard=rows)
 
 
+REJECT_REASONS = {1: "не по теме", 2: "дубль", 3: "слишком общее", 4: "не туда записал"}
+
+
+def reject_kb(did: int) -> K:
+    row = [B(text=t, callback_data=f"nr:{did}:{i}") for i, t in REJECT_REASONS.items()]
+    return K(inline_keyboard=[row[:2], row[2:], [B(text="без причины", callback_data=f"nr:{did}:0")]])
+
+
 def written_kb(bid: int) -> K:
     return K(inline_keyboard=[[B(text="↩️ Откатить", callback_data=f"rb:{bid}")]])
 
@@ -166,6 +174,15 @@ def pilot_card(post, channel: str, link: str) -> str:
 def pilot_kb(pid: int) -> K:
     return K(inline_keyboard=[[B(text="👍 полезно", callback_data=f"pl:{pid}:1"),
                                B(text="👎 мусор", callback_data=f"pl:{pid}:0")]])
+
+
+def eval_card(d, post, channel: str, link: str, i: int, n: int) -> str:
+    return f"🧪 Проверка фильтра {i}/{n}: писать такое в Obsidian автоматом?\n\n" + draft_card(d, post, channel, link)
+
+
+def eval_kb(pid: int, link: str) -> K:
+    return K(inline_keyboard=[[B(text="👍 писать", callback_data=f"ev:{pid}:1"), B(text="👎 не надо", callback_data=f"ev:{pid}:0")],
+                              [B(text="🔗 пост", url=link)]])
 
 
 def audit_card(audit, block) -> str:

@@ -325,3 +325,65 @@ def test_video_asks_calibration_goes_before_best_score(tmp_path, db):
     asyncio.run(app.tick(bot))
     texts = [m[1] for m in bot.sent]
     assert len(texts) == 2 and "видео 3" in texts[0] and "видео 4" in texts[1]  # слабые, но из канала без ответов
+
+
+def test_eval_batch_random_drafts_without_video_writes_eval_labels(s, db):
+    a = make_draft(db, 1, "new", "ИИ работа", content="текст про промпты")
+    b = make_draft(db, 2, "new", "ИИ работа", content="ещё текст")
+    v = make_draft(db, 3, "new", "ИИ работа", content="про видео")
+    db.update_post(db.get_draft(v)["post_id"], media=[{"msg_id": 3, "kind": "video"}])
+    done = make_draft(db, 4, "new", "ИИ работа", content="уже размечен")
+    db.add_label(db.get_draft(done)["post_id"], True, source="video")
+    bot = FakeBot()
+    app = app_at(s, db)
+    assert asyncio.run(app.eval_batch(bot, n=10)) == 2          # видео и размеченный не берутся
+    assert all(t.startswith("🧪 Проверка фильтра") for _, t, _ in bot.sent)
+    assert asyncio.run(app.eval_batch(bot, n=10)) == 0          # повтор не шлёт те же посты
+    pa, pb = db.get_draft(a)["post_id"], db.get_draft(b)["post_id"]
+    app.handle_callback(f"ev:{pa}:1")
+    app.handle_callback(f"ev:{pb}:0")
+    got = {r["post_id"]: (r["useful"], r["source"]) for r in db.c.execute("SELECT * FROM labels")}
+    assert got[pa] == (1, "eval") and got[pb] == (0, "eval")
+    assert db.get_draft(a)["status"] == "drafted"               # в vault ничего не уходит
+
+
+def test_no_stamps_decided_at_and_offers_reasons(s, db):
+    did = make_draft(db, 1, "append", REL)
+    text, kb = app_at(s, db).handle_callback(f"no:{did}")
+    assert "❌ Отклонено" in text
+    assert db.get_draft(did)["decided_at"]
+    assert [b.callback_data for row in kb.inline_keyboard for b in row] == [
+        f"nr:{did}:1", f"nr:{did}:2", f"nr:{did}:3", f"nr:{did}:4", f"nr:{did}:0"]
+
+
+def test_reject_reason_is_saved_on_post_and_keeps_prefix(s, db):
+    did = make_draft(db, 1, "append", REL)
+    app = app_at(s, db)
+    app.handle_callback(f"no:{did}")
+    text, kb = app.handle_callback(f"nr:{did}:2")
+    assert kb is None and "дубль" in text
+    d = db.get_draft(did)
+    assert db.get_post(d["post_id"])["reason"] == "отклонил Некит: дубль"
+    assert d["status"] == "rejected"
+
+
+def test_reject_reason_zero_skips_and_leaves_plain_reason(s, db):
+    did = make_draft(db, 1, "append", REL)
+    app = app_at(s, db)
+    app.handle_callback(f"no:{did}")
+    app.handle_callback(f"nr:{did}:0")
+    assert db.get_post(db.get_draft(did)["post_id"])["reason"] == "отклонил Некит"
+
+
+def test_reject_reason_ignored_for_not_rejected_draft(s, db):
+    did = make_draft(db, 1, "append", REL)
+    assert app_at(s, db).handle_callback(f"nr:{did}:1") == (None, None)  # чужой/старый тап не портит живой черновик
+    assert db.get_draft(did)["status"] == "drafted"
+
+
+def test_ok_stamps_decided_at(s, db):
+    did = make_draft(db, 1, "append", REL)
+    (s.vault / "ИИ работа").mkdir()
+    (s.vault / REL).write_text("# Промпты\n", "utf-8")
+    app_at(s, db).handle_callback(f"ok:{did}")
+    assert db.get_draft(did)["decided_at"]

@@ -131,6 +131,10 @@ class DB:
                 self.c.execute(f"ALTER TABLE labels ADD COLUMN {col} {ddl}")
         if "emb" not in {r["name"] for r in self.c.execute("PRAGMA table_info(posts)")}:
             self.c.execute("ALTER TABLE posts ADD COLUMN emb BLOB")  # вектор кандидата для поиска дублей
+        have = {r["name"] for r in self.c.execute("PRAGMA table_info(drafts)")}
+        for col in ("decided_at", "prompt_ver", "brain_model"):  # метки для eval: когда решил Некит, чем и каким промптом сделано
+            if col not in have:
+                self.c.execute(f"ALTER TABLE drafts ADD COLUMN {col} TEXT")
 
     def _update(self, table: str, key: str, kval, fields: dict) -> None:
         if not fields:
@@ -240,6 +244,22 @@ class DB:
             "SELECT * FROM posts WHERE score IS NOT NULL AND id NOT IN (SELECT post_id FROM labels) "
             "ORDER BY RANDOM() LIMIT ?", (n,)).fetchall()
 
+    def eval_sample(self, n: int, skip: set[int] = frozenset()) -> list:
+        """Случайные черновики без видео для eval-набора (07.11.2026): та самая выборка, которую автозапись писала бы без ✅.
+        Случайные, а не лучшие по score: иначе замер порога смещён. Уже размеченные посты и ранее отправленные (skip) не берём."""
+        rows = self.c.execute(
+            "SELECT d.id AS did, p.id AS pid, p.media FROM drafts d JOIN posts p ON p.id = d.post_id "
+            "WHERE d.status IN ('drafted','sent') AND p.id NOT IN (SELECT post_id FROM labels) "
+            "ORDER BY RANDOM()").fetchall()
+        out: list = []
+        for r in rows:
+            if r["pid"] in skip or '"kind": "video"' in (r["media"] or ""):
+                continue
+            out.append(self.get_draft(r["did"]))
+            if len(out) >= n:
+                break
+        return out
+
     # --- channels
     def max_msg_id(self, chat_id: int) -> int:
         return self.c.execute("SELECT COALESCE(MAX(msg_id), 0) FROM posts WHERE chat_id=?", (chat_id,)).fetchone()[0]
@@ -258,10 +278,10 @@ class DB:
 
     # --- drafts
     def add_draft(self, post_id: int, mode: str, target: str, title: str | None, content: str,
-                  keep_image: bool, alts: list) -> int:
+                  keep_image: bool, alts: list, prompt_ver: str | None = None, brain_model: str | None = None) -> int:
         return self._insert("drafts", {"post_id": post_id, "mode": mode, "target": target, "title": title,
                                        "content": content, "keep_image": int(keep_image), "alts": alts,
-                                       "created": _now()})
+                                       "prompt_ver": prompt_ver, "brain_model": brain_model, "created": _now()})
 
     def get_draft(self, did: int):
         return self.c.execute("SELECT * FROM drafts WHERE id=?", (did,)).fetchone()
@@ -271,6 +291,9 @@ class DB:
 
     def update_draft(self, did: int, **fields) -> None:
         self._update("drafts", "id", did, fields)
+
+    def stamp_decision(self, did: int) -> None:
+        self.update_draft(did, decided_at=_now())
 
     # --- blocks
     def add_block(self, draft_id: int, path: str, kind: str, start: int, stop: int, sha: str, extra: dict) -> int:

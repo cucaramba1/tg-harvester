@@ -13,7 +13,7 @@ from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
 from .autovideo import calibration_picks
 from .brain import alternatives
-from .cards import (REASONS, alts_kb, audit_card, audit_kb, audit_text, confirm_kb, draft_card, draft_kb, more_kb,
+from .cards import (REASONS, REJECT_REASONS, reject_kb, alts_kb, audit_card, audit_kb, audit_text, confirm_kb, draft_card, draft_kb, eval_card, eval_kb, more_kb,
                     more_text, night_text, pilot_card, pilot_kb, reason_kb, status_text, topic_card, topic_kb,
                     topic_report_card, topic_report_kb, video_card, video_kb, written_kb)
 from .config import Settings
@@ -255,6 +255,20 @@ class App:
             await self._send(bot, pilot_card(p, self.s.channel_name(p["chat_id"]), post_link(p["chat_id"], p["msg_id"])), pilot_kb(p["id"]))
             await asyncio.sleep(self.pause)
 
+    async def eval_batch(self, bot, n: int = 50) -> int:
+        """Eval-набор: n случайных черновиков без видео, 👍/👎 пишут метку source=eval, в vault ничего не уходит.
+        Отправленные запоминаются в kv, повтор команды не шлёт те же посты. Возвращает число отправленных."""
+        seen = {int(x) for x in (self.db.kv_get("eval_sent", "") or "").split(",") if x}
+        sample = self.db.eval_sample(n, seen)
+        for i, d in enumerate(sample, 1):
+            post = self.db.get_post(d["post_id"])
+            link = post_link(post["chat_id"], post["msg_id"])
+            await self._send(bot, eval_card(d, post, self.s.channel_name(post["chat_id"]), link, i, len(sample)), eval_kb(post["id"], link))
+            seen.add(post["id"])
+            self.db.kv_set("eval_sent", ",".join(map(str, sorted(seen))))
+            await asyncio.sleep(self.pause)
+        return len(sample)
+
     def status(self) -> str:
         phases = [(c.name, (self.db.channel(c.id) or {"phase": "ещё не начат"})["phase"]) for c in self.s.channels]
         return status_text(self.db.counts(), phases)
@@ -262,11 +276,11 @@ class App:
     # --- кнопки
     def handle_callback(self, data: str):
         kind, _, rest = data.partition(":")
-        h = {"ok": self.on_ok, "no": self.on_no, "alt": self.on_alt, "back": self.on_back, "to": self.on_to,
+        h = {"ok": self.on_ok, "no": self.on_no, "nr": self.on_nr, "alt": self.on_alt, "back": self.on_back, "to": self.on_to,
              "rb": self.on_rb, "rby": self.on_rby, "rbn": self.on_rbn, "vy": self.on_vy, "vn": self.on_vn, "vr": self.on_vr,
              "tc": self.on_tc, "t3": self.on_t3, "tx": self.on_tx,
              "tw": self.on_tw, "tn": self.on_tn,
-             "pl": self.on_pl, "mv": self.on_mv, "ab": self.on_ab, "ak": self.on_ak}.get(kind)
+             "pl": self.on_pl, "ev": self.on_ev, "mv": self.on_mv, "ab": self.on_ab, "ak": self.on_ak}.get(kind)
         if h is None or not rest:
             return None, None
         try:
@@ -285,6 +299,7 @@ class App:
             bid = self.writer.apply(did)
         except WriteError as e:
             return f"{text}\n\n⚠️ Не записал: {e}", kb  # кнопки остаются: можно сменить цель или отклонить
+        self.db.stamp_decision(did)
         b = self.db.get_block(bid)
         return f"{text}\n\n✅ Записано в [[{PurePosixPath(b['path']).stem}]]", written_kb(bid)
 
@@ -294,9 +309,22 @@ class App:
             return "Уже обработано", None
         text, _ = self._card(d)
         self.db.update_draft(did, status="rejected")
+        self.db.stamp_decision(did)
         self.db.update_post(d["post_id"], status="rejected", reason="отклонил Некит")
         drop_keep(self.s, d["post_id"])
-        return f"{text}\n\n❌ Отклонено", None
+        return f"{text}\n\n❌ Отклонено", reject_kb(did)  # причина по желанию: пойдёт в метки для eval
+
+    def on_nr(self, did: int, code: int):
+        d = self.db.get_draft(did)
+        if d is None or d["status"] != "rejected":
+            return None, None  # старый или чужой тап: живой черновик не трогаем
+        why = REJECT_REASONS.get(code)
+        if why is None:  # 0 = «без причины»: просто убираем кнопки
+            text, _ = self._card(d)
+            return f"{text}\n\n❌ Отклонено", None
+        self.db.update_post(d["post_id"], reason=f"отклонил Некит: {why}")
+        text, _ = self._card(d)
+        return f"{text}\n\n❌ Отклонено: {why}", None
 
     def on_alt(self, did: int):
         d = self.db.get_draft(did)
@@ -409,6 +437,10 @@ class App:
         self.db.add_label(pid, bool(useful))
         return ("👍" if useful else "👎") + " учтено", None
 
+    def on_ev(self, pid: int, useful: int):
+        self.db.add_label(pid, bool(useful), source="eval")
+        return ("👍 писать" if useful else "👎 не надо") + ": учтено в проверке фильтра", None
+
     def on_ab(self, aid: int):
         a = self.db.get_audit(aid)
         if a is None:
@@ -444,6 +476,12 @@ def build_dispatcher(app: App) -> Dispatcher:
     async def _pilot(m: Message):
         await m.answer("🧪 Шлю выборку постов, отметь каждый: полезно или мусор")
         await app.pilot(m.bot)
+
+    @r.message(owner, Command("eval"))
+    async def _eval(m: Message):
+        await m.answer("🧪 Шлю 50 случайных черновиков без видео. 👍 писать / 👎 не надо, в vault ничего не уходит")
+        n = await app.eval_batch(m.bot)
+        await m.answer(f"Отправлено {n}. Ответишь на все, скажи Claude: посчитаю порог по ним" if n else "Подходящих черновиков больше нет")
 
     @r.message(owner, Command("calibrate"))
     async def _calibrate(m: Message):
