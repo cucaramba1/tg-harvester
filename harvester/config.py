@@ -47,8 +47,8 @@ class Settings:
     api_id: int
     api_hash: str
     claude_bin: str
-    whisper_bin: str
-    whisper_model: str
+    groq_key: str
+    stt_model: str
     goals_note: str
     channels: list[Channel]
     retro_until: date
@@ -173,8 +173,8 @@ def load_settings(root: Path | None = None) -> Settings:
         api_id=int(env("TG_API_ID") or 0),
         api_hash=env("TG_API_HASH"),
         claude_bin=env("CLAUDE_BIN", str(home / ".npm-global/bin/claude")),
-        whisper_bin=env("WHISPER_BIN", str(home / ".local/bin/mlx_whisper")),
-        whisper_model=env("WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo"),
+        groq_key=env("GROQ_API_KEY"),
+        stt_model=env("STT_MODEL", "whisper-large-v3-turbo"),
         goals_note=cfg["goals_note"],
         channels=[Channel(int(c["id"]), str(c["name"]), bool(c.get("backfill", True))) for c in raw_channels],
         retro_until=ru if isinstance(ru, date) else date.fromisoformat(str(ru)),

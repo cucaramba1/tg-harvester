@@ -15,7 +15,7 @@ def make_settings(tmp: Path, **over) -> Settings:
     vault.mkdir(exist_ok=True)
     base = dict(
         root=tmp, vault=vault, bot_token="t", owner_id=1, api_id=1, api_hash="h",
-        claude_bin="claude", whisper_bin="whisper", whisper_model="m", goals_note="goals.md",
+        claude_bin="claude", groq_key="k", stt_model="m", goals_note="goals.md",
         channels=[Channel(CHAT_A, "Канал А"), Channel(CHAT_B, "Канал Б", backfill=False)],
         retro_until=date(2025, 10, 10), retro_cap=5000, retro_fallback_days=60, chunk=3, request_pause=0,
         min_chars=20, ad_markers=["erid", "розыгрыш"], max_images=4, min_free_gb=10, embed_model="m",
