@@ -77,7 +77,8 @@ class VaultVectors:
         try:
             data = np.load(self.s.index_path)
             meta = json.loads(str(data["meta"]))
-            return {r: (mt, data["vecs"][i]) for i, (r, mt) in enumerate(meta)}
+            vecs = data["vecs"]  # один раз: у npz каждое data["vecs"] заново читает весь массив, в цикле это +4 МБ на каждую заметку (2600 заметок = 10 ГБ)
+            return {r: (mt, vecs[i]) for i, (r, mt) in enumerate(meta)}
         except (OSError, ValueError, KeyError):
             return {}
 

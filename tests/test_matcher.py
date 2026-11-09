@@ -151,3 +151,22 @@ def test_duplicate_candidates_are_marked_not_sent_to_night(s, db):
     for i in range(600):  # буфер растёт без потери векторов
         idx.add(i, np.eye(600, dtype=np.float32)[i])
     assert idx.find(np.eye(600, dtype=np.float32)[599]) == 599
+
+
+def test_load_reads_npz_vecs_once(s, monkeypatch):
+    """Регрессия 07.11.2026: data["vecs"] у npz читает весь массив при каждом обращении, в цикле по заметкам это +10 ГБ на сервере."""
+    vault(s)
+    VaultVectors(s, FakeEmbedder()).refresh()
+    real, reads = np.load, []
+
+    class Counting:
+        def __init__(self, d):
+            self.d = d
+
+        def __getitem__(self, k):
+            reads.append(k)
+            return self.d[k]
+
+    monkeypatch.setattr(np, "load", lambda *a, **kw: Counting(real(*a, **kw)))
+    cache = VaultVectors(s, FakeEmbedder())._load()
+    assert len(cache) == 3 and reads.count("vecs") == 1
