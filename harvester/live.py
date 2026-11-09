@@ -16,7 +16,7 @@ from .db import DB
 from .enricher import Enricher
 from .topic_check import run_topic_checks
 from .topics import fetch_meta, split_big_topics, tag_topics
-from .writer import Writer
+from .packets import make_writer
 
 log = logging.getLogger(__name__)
 MATCH_EVERY = 3600  # постов ~3 в час, разбор черновиков ночью: матчить чаще незачем
@@ -148,7 +148,7 @@ async def run_live(s: Settings) -> None:
     col = Collector(s, db, tg)
     await col.init()
     client.add_event_handler(col.on_new, events.NewMessage(chats=[c.id for c in s.channels]))
-    app = App(s, db, Writer(s, db))
+    app = App(s, db, make_writer(s, db))
     dp = build_dispatcher(app)
     log.info("TG Harvester запущен")
     await asyncio.gather(_collect(col), _process(db, Enricher(s, db, tg)),
@@ -172,7 +172,7 @@ async def run_bot(s: Settings) -> None:
 
     db = DB(s.db_path)
     bot = Bot(s.bot_token)
-    app = App(s, db, Writer(s, db))
+    app = App(s, db, make_writer(s, db))
     dp = build_dispatcher(app)
     log.info("TG Harvester: режим «только бот»")
     await asyncio.gather(_tick(app, bot), dp.start_polling(bot, handle_signals=False))

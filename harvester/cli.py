@@ -34,7 +34,7 @@ async def _login(s) -> None:
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     p = argparse.ArgumentParser(prog="harvester")
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("login", "live", "bot", "night", "audit", "calibrate", "match", "dedup"):
+    for name in ("login", "live", "bot", "night", "audit", "calibrate", "match", "dedup", "applier"):
         sub.add_parser(name)
     av = sub.add_parser("autovideo")
     av.add_argument("action", choices=["backfill", "report"])
@@ -80,6 +80,10 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         rep = asyncio.run(run_night(s, DB(s.db_path)))
         prune_snapshots(s)
         print(rep)
+    elif a.cmd == "applier":
+        from .applier import run_applier
+        from .db import DB
+        print(run_applier(s, DB(s.db_path)))
     elif a.cmd == "audit":
         from .auditor import run_audit
         from .db import DB

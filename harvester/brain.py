@@ -101,7 +101,7 @@ async def run_claude(s: Settings, prompt: str, *, system: str, schema: dict | No
 
 
 ROUTER_URL = os.environ.get("FREELLM_URL", "http://127.0.0.1:3001")
-ROUTER_DB = Path.home() / "Claude Code/freellmapi/server/data/freeapi.db"
+ROUTER_DB = Path(os.environ.get("FREELLM_DB") or Path.home() / "Claude Code/freellmapi/server/data/freeapi.db")  # на сервере путь другой
 # на 99 постах gemini-3.8-flash совпал 82/99 против 88 у sonnet; у одной модели один маршрут, при лимите идём на auto
 ROUTER_MODELS = tuple(m.strip() for m in os.environ.get("FREELLM_MODEL", "gemini-3.8-flash,auto").split(",") if m.strip())
 

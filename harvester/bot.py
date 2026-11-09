@@ -17,6 +17,7 @@ from .cards import (REASONS, REJECT_REASONS, reject_kb, alts_kb, audit_card, aud
                     more_text, night_text, pilot_card, pilot_kb, reason_kb, status_text, topic_card, topic_kb,
                     topic_report_card, topic_report_kb, video_card, video_kb, written_kb)
 from .config import Settings
+from .packets import read_acks
 from .db import DB
 from .files import drop_keep, list_sections
 from .matcher import calibrate
@@ -42,7 +43,7 @@ class App:
 
     async def tick(self, bot) -> None:
         for step in (self.send_alerts, self.send_reports, self.send_topic_asks, self.send_topic_samples, self.send_topic_reports,
-                     self.send_video_asks, self.send_cards, self.send_audits,
+                     self.send_video_asks, self.send_cards, self.send_audits, self.send_acks,
                      self.send_more_prompt):
             try:
                 await step(bot)
@@ -239,6 +240,41 @@ class App:
             sent += 1
             self.db.kv_set(key, str(sent))
 
+    async def send_acks(self, bot) -> None:
+        """Ответы ноута на пакеты: дописать карточки («Записано» / ошибка / откат). База уже обновлена в read_acks."""
+        for ev in await asyncio.to_thread(read_acks, self.s, self.db):
+            try:
+                await self._show_ack(bot, ev)
+            except Exception:  # noqa: BLE001 карточка не обновилась, но запись уже в базе
+                log.exception("ack %s", ev)
+
+    async def _show_ack(self, bot, ev: dict) -> None:
+        if ev["type"] == "rolled_back":
+            b = self.db.get_block(ev["block_id"])
+            d = self.db.get_draft(b["draft_id"]) if b else None
+            note = self._rollback_text(ev["res"]) + (f": {ev['error']}" if ev.get("error") else "")
+            await self._edit_card(bot, d, note, None)
+            return
+        d = self.db.get_draft(ev["draft_id"])
+        if d is None:
+            return
+        text, kb = self._card(d)
+        if ev["type"] == "written":
+            await self._edit_card(bot, d, f"✅ Записано в [[{PurePosixPath(ev['path']).stem}]]", written_kb(ev["block_id"]))
+        else:
+            await self._edit_card(bot, d, f"⚠️ Не записал: {ev['error']}", kb)
+
+    async def _edit_card(self, bot, d, note: str, kb) -> None:
+        text = f"{self._card(d)[0]}\n\n{note}" if d is not None else note
+        if d is not None and d["card_msg_id"]:
+            try:
+                await bot.edit_message_text(text, chat_id=self.s.owner_id, message_id=d["card_msg_id"], reply_markup=kb,
+                                            link_preview_options=NO_PREVIEW)
+                return
+            except Exception:  # noqa: BLE001 сообщение удалено или не меняется: пришлём новым
+                log.warning("не смог править карточку %s", d["id"])
+        await self._send(bot, text, kb)
+
     async def send_audits(self, bot) -> None:
         if not self._day_open():
             return
@@ -300,6 +336,8 @@ class App:
         except WriteError as e:
             return f"{text}\n\n⚠️ Не записал: {e}", kb  # кнопки остаются: можно сменить цель или отклонить
         self.db.stamp_decision(did)
+        if bid is None:  # пакетный режим (сервер): запись сделает ноут, когда выйдет на связь
+            return f"{text}\n\n⏳ В очереди на запись: ноут запишет, когда будет онлайн", None
         b = self.db.get_block(bid)
         return f"{text}\n\n✅ Записано в [[{PurePosixPath(b['path']).stem}]]", written_kb(bid)
 
@@ -353,7 +391,8 @@ class App:
         return None, written_kb(bid)
 
     def _rollback_text(self, res: str) -> str:
-        return {"ok": "↩️ Откатил", "already": "Уже откачено", "gone": "⚠️ Файла уже нет",
+        return {"ok": "↩️ Откатил", "already": "Уже откачено", "queued": "⏳ Откат в очереди: ноут сделает, когда будет онлайн",
+                "error": "⚠️ Ноут не смог откатить", "gone": "⚠️ Файла уже нет",
                 "changed": f"⚠️ Блок правили руками, откати вручную. Снапшоты: {self.s.snapshots_dir}"}[res]
 
     def on_rby(self, bid: int):

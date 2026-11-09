@@ -97,6 +97,10 @@ class Settings:
     explore_keywords: tuple = ()  # посты вне тем с этими словами идут в ночь первыми
     night_section_cap: int = 60  # постов одного раздела за ночь (0 = без потолка)
     dup_threshold: float = 0.90  # cosine для дублей кандидатов (замер tools/tg-harvester/bench/dup_threshold.py)
+    apply_mode: str = "local"  # local: Writer пишет в vault сразу; packet (сервер): запись уходит пакетом на ноут
+    remote_host: str = ""  # для applier на ноуте: user@SERVER_IP
+    remote_key: str = ""   # путь к SSH-ключу
+    remote_root: str = "tg-harvester"  # папка проекта на сервере (от домашней)
 
     @property
     def data_dir(self) -> Path:
@@ -137,6 +141,22 @@ class Settings:
     @property
     def calibration_path(self) -> Path:
         return self.data_dir / "calibration.json"
+
+    @property
+    def outbox_dir(self) -> Path:  # сервер: пакеты записи для ноута
+        return self.data_dir / "outbox"
+
+    @property
+    def acks_dir(self) -> Path:  # сервер: ответы ноута
+        return self.data_dir / "acks"
+
+    @property
+    def inbox_dir(self) -> Path:  # ноут: пакеты, забранные с сервера
+        return self.data_dir / "inbox"
+
+    @property
+    def acks_out_dir(self) -> Path:  # ноут: ответы, ещё не отправленные на сервер
+        return self.data_dir / "acks_out"
 
     @property
     def vaults(self) -> list[Path]:
@@ -219,6 +239,10 @@ def load_settings(root: Path | None = None) -> Settings:
         video_auto_conf=float(cfg.get("video_auto_conf", 0.9)),
         video_auto_min_n=int(cfg.get("video_auto_min_n", 8)),
         dup_threshold=float(cfg.get("dup_threshold", 0.90)),
+        apply_mode=env("APPLY_MODE", "local"),
+        remote_host=env("REMOTE_HOST"),
+        remote_key=env("REMOTE_KEY"),
+        remote_root=env("REMOTE_ROOT", "tg-harvester"),
         night_section_cap=int(cfg.get("night_section_cap", 60)),
         explore_keywords=tuple(cfg.get("explore_keywords") or ()),
         video_calib_channels=tuple(int(x) for x in cfg.get("video_calib_channels") or ()),

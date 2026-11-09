@@ -300,6 +300,21 @@ class DB:
         return self._insert("blocks", {"draft_id": draft_id, "path": path, "kind": kind, "start": start,
                                        "stop": stop, "sha": sha, "extra": extra, "created": _now()})
 
+    def put_block(self, row: dict) -> None:
+        """Блок, записанный на ноуте (пакетный режим): строка приходит целиком, с тем же id."""
+        cols = ("id", "draft_id", "path", "kind", "start", "stop", "sha", "extra", "created", "rolled_back")
+        self.c.execute(f"INSERT OR REPLACE INTO blocks({', '.join(cols)}) VALUES({', '.join('?' * len(cols))})",
+                       tuple(row[k] for k in cols))
+
+    def block_for_draft(self, did: int):
+        return self.c.execute("SELECT * FROM blocks WHERE draft_id=? ORDER BY id DESC LIMIT 1", (did,)).fetchone()
+
+    def upsert_row(self, table: str, row: dict) -> None:
+        """Строка posts/drafts целиком по id (пакеты с сервера)."""
+        cols = list(row)
+        self.c.execute(f"INSERT OR REPLACE INTO {table}({', '.join(cols)}) VALUES({', '.join('?' * len(cols))})",
+                       tuple(row[k] for k in cols))
+
     def get_block(self, bid: int):
         return self.c.execute("SELECT * FROM blocks WHERE id=?", (bid,)).fetchone()
 

@@ -32,6 +32,9 @@ def free_gb(path: Path = Path.home()) -> float:
 
 
 def ocr_image(path: Path) -> str:
+    if sys.platform.startswith("linux"):
+        from .ocr_linux import ocr_image as _ocr_linux
+        return _ocr_linux(path)
     if sys.platform != "darwin":
         try:
             from .ocr_windows import ocr_image as _ocr  # Windows.Media.Ocr; модуль пишется и проверяется на самой Windows
